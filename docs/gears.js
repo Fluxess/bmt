@@ -16,14 +16,14 @@
   var camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
   camera.position.set(0, 0, 18);
 
-  var amb = new THREE.AmbientLight(0x38bdf8, 0.25);
+  var amb = new THREE.AmbientLight(0x455038, 0.4);
   scene.add(amb);
 
-  var dir1 = new THREE.DirectionalLight(0x94a3b8, 0.55);
+  var dir1 = new THREE.DirectionalLight(0xf4dce2, 0.6);
   dir1.position.set(5, 8, 10);
   scene.add(dir1);
 
-  var dir2 = new THREE.DirectionalLight(0x0284c7, 0.3);
+  var dir2 = new THREE.DirectionalLight(0x38452d, 0.4);
   dir2.position.set(-6, -4, -4);
   scene.add(dir2);
 
@@ -103,15 +103,15 @@
   }
 
   var mat1 = new THREE.MeshStandardMaterial({
-    color: 0x38bdf8,
-    metalness: 0.65,
-    roughness: 0.55,
+    color: 0x8c9676,
+    metalness: 0.7,
+    roughness: 0.5,
     transparent: true,
     opacity: 0.16,
   });
 
   var mat2 = new THREE.MeshStandardMaterial({
-    color: 0x475569,
+    color: 0x58634a,
     metalness: 0.65,
     roughness: 0.6,
     transparent: true,
@@ -119,11 +119,11 @@
   });
 
   var mat3 = new THREE.MeshStandardMaterial({
-    color: 0x0284c7,
-    metalness: 0.6,
-    roughness: 0.6,
+    color: 0x9e7c87,
+    metalness: 0.7,
+    roughness: 0.55,
     transparent: true,
-    opacity: 0.15,
+    opacity: 0.16,
   });
 
   var group = new THREE.Group();
