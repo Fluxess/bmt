@@ -112,6 +112,12 @@ select {
   font: inherit;
 }
 
+.lbl {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
 .btn {
   background: var(--accent);
   color: #0f172a;

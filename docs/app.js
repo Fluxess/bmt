@@ -93,17 +93,17 @@
 
     var form = el(
       '<form class="stack">' +
-        '<input name="name" required maxlength="40" placeholder="Название, например ИС-31" />' +
+        '<input name="groupName" required maxlength="40" placeholder="Название, например ИС-31" />' +
         '<button class="btn" type="submit">Создать группу</button>' +
         "</form>"
     );
     form.addEventListener("submit", function (e) {
       e.preventDefault();
-      var name = form.name.value.trim();
+      var name = new FormData(form).get("groupName");
+      name = name ? String(name).trim() : "";
       if (!name) return;
       data.groups.push({ id: store.uid(), name: name, students: [], events: [] });
       persist();
-      form.reset();
       render();
     });
     card.appendChild(form);
@@ -172,12 +172,13 @@
     var addSt = el(
       '<section class="card"><h2>Новый студент</h2>' +
         '<form class="stack">' +
-        '<input name="name" required maxlength="80" placeholder="ФИО" />' +
+        '<input name="studentName" required maxlength="80" placeholder="ФИО" />' +
         '<button class="btn" type="submit">Добавить</button></form></section>'
     );
     addSt.querySelector("form").addEventListener("submit", function (e) {
       e.preventDefault();
-      var name = e.target.name.value.trim();
+      var name = new FormData(e.target).get("studentName");
+      name = name ? String(name).trim() : "";
       if (!name) return;
       g.students.push({ id: store.uid(), name: name });
       persist();
@@ -185,40 +186,56 @@
     });
     root.appendChild(addSt);
 
-    var addPts = el(
-      '<section class="card"><h2>Начислить / списать</h2>' +
-        '<form class="stack">' +
-        '<select name="studentId" required></select>' +
-        '<select name="category"></select>' +
-        '<input name="delta" type="number" required step="1" placeholder="Баллы, например 5 или -2" />' +
-        '<input name="reason" maxlength="120" placeholder="Причина" />' +
-        '<button class="btn" type="submit">Сохранить</button></form></section>'
-    );
-    var sel = addPts.querySelector('[name="studentId"]');
-    g.students.forEach(function (s) {
-      sel.appendChild(el('<option value="' + s.id + '">' + escapeHtml(s.name) + "</option>"));
-    });
-    var catSel = addPts.querySelector('[name="category"]');
-    store.CATEGORIES.forEach(function (c) {
-      catSel.appendChild(el("<option>" + escapeHtml(c) + "</option>"));
-    });
-    addPts.querySelector("form").addEventListener("submit", function (e) {
-      e.preventDefault();
-      if (!g.students.length) return;
-      var delta = Number(e.target.delta.value);
-      if (!delta) return;
-      g.events.unshift({
-        id: store.uid(),
-        studentId: e.target.studentId.value,
-        delta: delta,
-        category: e.target.category.value,
-        reason: e.target.reason.value.trim() || "Без комментария",
-        at: new Date().toISOString(),
+    if (!g.students.length) {
+      root.appendChild(
+        el(
+          '<section class="card"><h2>Начислить / списать</h2>' +
+            '<p class="status">Сначала добавьте хотя бы одного студента — список появится здесь.</p></section>'
+        )
+      );
+    } else {
+      var addPts = el(
+        '<section class="card"><h2>Начислить / списать</h2>' +
+          '<form class="stack">' +
+          '<label class="lbl">Студент</label>' +
+          '<select name="studentId" required></select>' +
+          '<label class="lbl">Категория</label>' +
+          '<select name="category"></select>' +
+          '<label class="lbl">Баллы</label>' +
+          '<input name="delta" type="number" required step="1" placeholder="Например 5 или -2" />' +
+          '<label class="lbl">Причина</label>' +
+          '<input name="reason" maxlength="120" placeholder="За что начислено" />' +
+          '<button class="btn" type="submit">Сохранить</button></form></section>'
+      );
+      var sel = addPts.querySelector('[name="studentId"]');
+      g.students.forEach(function (s) {
+        sel.appendChild(
+          el('<option value="' + s.id + '">' + escapeHtml(s.name) + "</option>")
+        );
       });
-      persist();
-      render();
-    });
-    root.appendChild(addPts);
+      var catSel = addPts.querySelector('[name="category"]');
+      store.CATEGORIES.forEach(function (c) {
+        catSel.appendChild(el("<option>" + escapeHtml(c) + "</option>"));
+      });
+      addPts.querySelector("form").addEventListener("submit", function (e) {
+        e.preventDefault();
+        var fd = new FormData(e.target);
+        var delta = Number(fd.get("delta"));
+        var studentId = String(fd.get("studentId") || "");
+        if (!delta || !studentId) return;
+        g.events.unshift({
+          id: store.uid(),
+          studentId: studentId,
+          delta: delta,
+          category: String(fd.get("category") || "Прочее"),
+          reason: String(fd.get("reason") || "").trim() || "Без комментария",
+          at: new Date().toISOString(),
+        });
+        persist();
+        render();
+      });
+      root.appendChild(addPts);
+    }
 
     var danger = el(
       '<section class="card"><button class="btn btn-ghost" type="button">Удалить группу</button></section>'
