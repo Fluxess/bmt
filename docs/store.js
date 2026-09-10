@@ -1,5 +1,6 @@
 (function (global) {
   var KEY = "bmt-points-v1";
+  var PHOTO_KINDS = ["Грамота", "Фото группы", "Мероприятие", "Прочее"];
   var CATEGORIES = ["Учёба", "Дисциплина", "Мероприятия", "Прочее"];
 
   function uid() {
@@ -19,8 +20,20 @@
       data.groups.forEach(function (g) {
         if (!Array.isArray(g.students)) g.students = [];
         if (!Array.isArray(g.events)) g.events = [];
+        if (!Array.isArray(g.photos)) g.photos = [];
         g.students.forEach(function (s) {
-          if (!Array.isArray(s.portfolio)) s.portfolio = [];
+          if (Array.isArray(s.portfolio) && s.portfolio.length) {
+            s.portfolio.forEach(function (item) {
+              g.photos.push({
+                id: item.id || uid(),
+                kind: "Грамота",
+                title: item.title || "Грамота",
+                image: item.image,
+                at: item.at || new Date().toISOString(),
+              });
+            });
+          }
+          delete s.portfolio;
         });
       });
       return data;
@@ -73,6 +86,7 @@
   }
 
   global.BmtStore = {
+    PHOTO_KINDS: PHOTO_KINDS,
     CATEGORIES: CATEGORIES,
     uid: uid,
     load: load,

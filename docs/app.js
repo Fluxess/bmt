@@ -129,7 +129,13 @@
       var name = new FormData(form).get("groupName");
       name = name ? String(name).trim() : "";
       if (!name) return;
-      data.groups.push({ id: store.uid(), name: name, students: [], events: [] });
+      data.groups.push({
+        id: store.uid(),
+        name: name,
+        students: [],
+        events: [],
+        photos: [],
+      });
       persist();
       render();
     });
@@ -171,6 +177,7 @@
     });
     head.appendChild(chips);
     root.appendChild(head);
+    root.appendChild(renderGroupPhotos(g));
 
     var table = el('<section class="card"><h2>Рейтинг</h2></section>');
     if (!ranked.length) {
@@ -207,7 +214,7 @@
       var name = new FormData(e.target).get("studentName");
       name = name ? String(name).trim() : "";
       if (!name) return;
-      g.students.push({ id: store.uid(), name: name, portfolio: [] });
+      g.students.push({ id: store.uid(), name: name });
       persist();
       render();
     });
@@ -294,6 +301,86 @@
     root.appendChild(danger);
   }
 
+  function renderGroupPhotos(g) {
+    if (!Array.isArray(g.photos)) g.photos = [];
+    var box = el(
+      '<section class="card"><h2>Альбом группы</h2>' +
+        '<p class="status">Грамоты, общее фото группы, мероприятия — без карточек студентов.</p></section>'
+    );
+    var grid = document.createElement("div");
+    grid.className = "gallery";
+    if (!g.photos.length) {
+      box.appendChild(el('<p class="status">Пока нет фото.</p>'));
+    } else {
+      g.photos.forEach(function (item) {
+        var fig = el(
+          '<figure class="shot"><img alt=""/><figcaption></figcaption>' +
+            '<button class="link" type="button">Удалить</button></figure>'
+        );
+        fig.querySelector("img").src = item.image;
+        fig.querySelector("figcaption").textContent =
+          (item.kind || "Фото") +
+          " · " +
+          (item.title || "") +
+          " · " +
+          formatDate(item.at);
+        fig.querySelector("button").addEventListener("click", function () {
+          g.photos = g.photos.filter(function (x) {
+            return x.id !== item.id;
+          });
+          persist();
+          render();
+        });
+        grid.appendChild(fig);
+      });
+      box.appendChild(grid);
+    }
+    var form = el(
+      '<form class="stack">' +
+        '<label class="lbl">Тип</label>' +
+        '<select name="kind"></select>' +
+        '<input name="title" maxlength="80" placeholder="Подпись, например День группы" />' +
+        '<input name="photo" type="file" accept="image/*" />' +
+        '<button class="btn" type="submit">Добавить фото</button></form>'
+    );
+    var kindSel = form.querySelector('[name="kind"]');
+    store.PHOTO_KINDS.forEach(function (k) {
+      kindSel.appendChild(option(k, k));
+    });
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var file = form.querySelector('[name="photo"]').files[0];
+      if (!file) {
+        alert("Выберите фото.");
+        return;
+      }
+      var fd = new FormData(form);
+      var kind = String(fd.get("kind") || "Прочее");
+      var title = String(fd.get("title") || "").trim() || kind;
+      compressImage(file, function (dataUrl) {
+        if (!dataUrl) {
+          alert("Не удалось прочитать фото.");
+          return;
+        }
+        try {
+          g.photos.unshift({
+            id: store.uid(),
+            kind: kind,
+            title: title,
+            image: dataUrl,
+            at: new Date().toISOString(),
+          });
+          persist();
+          render();
+        } catch (err) {
+          alert("Не хватило места в браузере. Удалите старые фото.");
+        }
+      });
+    });
+    box.appendChild(form);
+    return box;
+  }
+
   function renderStudent() {
     var g = groupById(state.groupId);
     var s = g && studentById(g, state.studentId);
@@ -332,73 +419,7 @@
     head.appendChild(chips);
     root.appendChild(head);
 
-    if (!Array.isArray(s.portfolio)) s.portfolio = [];
-    var port = el(
-      '<section class="card"><h2>Портфолио</h2>' +
-        '<p class="status">Грамоты, дипломы, сертификаты — фото с телефона.</p></section>'
-    );
-    var grid = document.createElement("div");
-    grid.className = "gallery";
-    if (!s.portfolio.length) {
-      port.appendChild(el('<p class="status">Пока нет файлов.</p>'));
-    } else {
-      s.portfolio.forEach(function (item) {
-        var fig = el(
-          '<figure class="shot"><img alt=""/><figcaption></figcaption>' +
-            '<button class="link" type="button">Удалить</button></figure>'
-        );
-        fig.querySelector("img").src = item.image;
-        fig.querySelector("figcaption").textContent =
-          item.title + " · " + formatDate(item.at);
-        fig.querySelector("button").addEventListener("click", function () {
-          s.portfolio = s.portfolio.filter(function (x) {
-            return x.id !== item.id;
-          });
-          persist();
-          render();
-        });
-        grid.appendChild(fig);
-      });
-      port.appendChild(grid);
-    }
-    var portForm = el(
-      '<form class="stack">' +
-        '<input name="title" maxlength="80" placeholder="Название, например Грамота за олимпиаду" />' +
-        '<input name="photo" type="file" accept="image/*" />' +
-        '<button class="btn" type="submit">Добавить в портфолио</button></form>'
-    );
-    portForm.addEventListener("submit", function (e) {
-      e.preventDefault();
-      var file = portForm.querySelector('[name="photo"]').files[0];
-      if (!file) {
-        alert("Выберите фото грамоты.");
-        return;
-      }
-      var title =
-        String(new FormData(portForm).get("title") || "").trim() || "Грамота";
-      compressImage(file, function (dataUrl) {
-        if (!dataUrl) {
-          alert("Не удалось прочитать фото.");
-          return;
-        }
-        try {
-          s.portfolio.unshift({
-            id: store.uid(),
-            title: title,
-            image: dataUrl,
-            at: new Date().toISOString(),
-          });
-          persist();
-          render();
-        } catch (err) {
-          alert("Не хватило места в браузере. Удалите старые фото.");
-        }
-      });
-    });
-    port.appendChild(portForm);
-    root.appendChild(port);
-
-    var hist = el('<section class="card"><h2>История</h2></section>');
+    var hist = el('<section class="card"><h2>История баллов</h2></section>');
     var events = g.events.filter(function (e) {
       return e.studentId === s.id;
     });
