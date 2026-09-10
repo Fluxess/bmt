@@ -16,14 +16,14 @@
   var camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
   camera.position.set(0, 0, 18);
 
-  var amb = new THREE.AmbientLight(0x38bdf8, 0.45);
+  var amb = new THREE.AmbientLight(0x38bdf8, 0.25);
   scene.add(amb);
 
-  var dir1 = new THREE.DirectionalLight(0xffffff, 1.1);
+  var dir1 = new THREE.DirectionalLight(0x94a3b8, 0.55);
   dir1.position.set(5, 8, 10);
   scene.add(dir1);
 
-  var dir2 = new THREE.DirectionalLight(0x0ea5e9, 0.6);
+  var dir2 = new THREE.DirectionalLight(0x0284c7, 0.3);
   dir2.position.set(-6, -4, -4);
   scene.add(dir2);
 
@@ -104,72 +104,73 @@
 
   var mat1 = new THREE.MeshStandardMaterial({
     color: 0x38bdf8,
-    metalness: 0.85,
-    roughness: 0.35,
+    metalness: 0.65,
+    roughness: 0.55,
     transparent: true,
-    opacity: 0.5,
+    opacity: 0.16,
   });
 
   var mat2 = new THREE.MeshStandardMaterial({
-    color: 0x64748b,
-    metalness: 0.9,
-    roughness: 0.3,
+    color: 0x475569,
+    metalness: 0.65,
+    roughness: 0.6,
     transparent: true,
-    opacity: 0.45,
+    opacity: 0.14,
   });
 
   var mat3 = new THREE.MeshStandardMaterial({
     color: 0x0284c7,
-    metalness: 0.8,
-    roughness: 0.4,
+    metalness: 0.6,
+    roughness: 0.6,
     transparent: true,
-    opacity: 0.4,
+    opacity: 0.15,
   });
 
   var group = new THREE.Group();
+  group.scale.set(0.55, 0.55, 0.55);
   scene.add(group);
 
   var g1 = new THREE.Mesh(
-    createGearGeometry({ teeth: 16, rOut: 2.8, rIn: 2.3, rHole: 0.85, depth: 0.4 }),
+    createGearGeometry({ teeth: 16, rOut: 2.5, rIn: 2.1, rHole: 0.8, depth: 0.35 }),
     mat1
   );
-  g1.position.set(-5.5, 4.0, -3);
+  g1.position.set(-9.5, 6.0, -2);
   g1.rotation.x = 0.35;
   g1.rotation.y = -0.3;
   group.add(g1);
 
   var g2 = new THREE.Mesh(
-    createGearGeometry({ teeth: 10, rOut: 1.8, rIn: 1.45, rHole: 0.6, depth: 0.35 }),
+    createGearGeometry({ teeth: 10, rOut: 1.6, rIn: 1.3, rHole: 0.55, depth: 0.3 }),
     mat2
   );
-  g2.position.set(-2.0, 5.8, -4);
+  g2.position.set(-6.2, 7.8, -3);
   g2.rotation.x = 0.35;
   g2.rotation.y = -0.3;
   group.add(g2);
 
   var g3 = new THREE.Mesh(
-    createGearGeometry({ teeth: 20, rOut: 3.6, rIn: 3.0, rHole: 1.1, depth: 0.45 }),
+    createGearGeometry({ teeth: 18, rOut: 3.0, rIn: 2.5, rHole: 0.95, depth: 0.4 }),
     mat3
   );
-  g3.position.set(6.0, -3.5, -2);
+  g3.position.set(10.0, -5.5, -2);
   g3.rotation.x = -0.25;
   g3.rotation.y = 0.4;
   group.add(g3);
 
   var g4 = new THREE.Mesh(
-    createGearGeometry({ teeth: 12, rOut: 2.1, rIn: 1.7, rHole: 0.7, depth: 0.35 }),
+    createGearGeometry({ teeth: 12, rOut: 1.9, rIn: 1.55, rHole: 0.65, depth: 0.3 }),
     mat1
   );
-  g4.position.set(4.0, 1.2, -5);
+  g4.position.set(7.5, -1.8, -4);
   g4.rotation.x = -0.25;
   g4.rotation.y = 0.4;
   group.add(g4);
 
   var g5 = new THREE.Mesh(
-    createGearGeometry({ teeth: 8, rOut: 1.4, rIn: 1.1, rHole: 0.45, depth: 0.3 }),
+    createGearGeometry({ teeth: 8, rOut: 1.25, rIn: 1.0, rHole: 0.4, depth: 0.25 }),
     mat2
   );
-  g5.position.set(-4.5, -5.5, -4);
+  g5.position.set(-8.5, -7.5, -3);
   g5.rotation.x = 0.2;
   g5.rotation.y = -0.2;
   group.add(g5);
@@ -196,14 +197,14 @@
     requestAnimationFrame(animate);
     var t = clock.getElapsedTime();
 
-    g1.rotation.z = t * 0.25;
-    g2.rotation.z = -t * 0.4 + 0.15;
-    g3.rotation.z = -t * 0.18;
-    g4.rotation.z = t * 0.3 + 0.2;
-    g5.rotation.z = t * 0.35;
+    g1.rotation.z = t * 0.12;
+    g2.rotation.z = -t * 0.19 + 0.15;
+    g3.rotation.z = -t * 0.09;
+    g4.rotation.z = t * 0.14 + 0.2;
+    g5.rotation.z = t * 0.16;
 
-    group.position.x += (pointerX * 0.4 - group.position.x) * 0.03;
-    group.position.y += (-pointerY * 0.3 - group.position.y) * 0.03;
+    group.position.x += (pointerX * 0.3 - group.position.x) * 0.02;
+    group.position.y += (-pointerY * 0.2 - group.position.y) * 0.02;
 
     renderer.render(scene, camera);
   }
