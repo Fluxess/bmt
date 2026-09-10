@@ -26,6 +26,33 @@
     return wrap.firstElementChild;
   }
 
+  function option(value, label) {
+    var o = document.createElement("option");
+    o.value = value;
+    o.textContent = label;
+    return o;
+  }
+
+  function compressImage(file, done) {
+    var img = new Image();
+    var url = URL.createObjectURL(file);
+    img.onload = function () {
+      var max = 1100;
+      var scale = Math.min(1, max / Math.max(img.width, img.height));
+      var canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      done(canvas.toDataURL("image/jpeg", 0.7));
+    };
+    img.onerror = function () {
+      URL.revokeObjectURL(url);
+      done(null);
+    };
+    img.src = url;
+  }
+
   function escapeHtml(text) {
     return String(text)
       .replace(/&/g, "&amp;")
@@ -180,52 +207,66 @@
       var name = new FormData(e.target).get("studentName");
       name = name ? String(name).trim() : "";
       if (!name) return;
-      g.students.push({ id: store.uid(), name: name });
+      g.students.push({ id: store.uid(), name: name, portfolio: [] });
       persist();
       render();
     });
     root.appendChild(addSt);
 
+    var addPts = el(
+      '<section class="card"><h2>Начислить / списать</h2></section>'
+    );
     if (!g.students.length) {
-      root.appendChild(
-        el(
-          '<section class="card"><h2>Начислить / списать</h2>' +
-            '<p class="status">Сначала добавьте хотя бы одного студента — список появится здесь.</p></section>'
-        )
+      addPts.appendChild(
+        el('<p class="status">Сначала добавьте студента кнопкой выше.</p>')
       );
     } else {
-      var addPts = el(
-        '<section class="card"><h2>Начислить / списать</h2>' +
-          '<form class="stack">' +
-          '<label class="lbl">Студент</label>' +
-          '<select name="studentId" required></select>' +
+      var picked = { id: g.students[0].id };
+      var pickLabel = el(
+        '<p class="status">Студент: <strong id="picked-name">' +
+          escapeHtml(g.students[0].name) +
+          "</strong></p>"
+      );
+      addPts.appendChild(pickLabel);
+      g.students.forEach(function (s) {
+        var btn = el(
+          '<button class="row pick" type="button">' +
+            escapeHtml(s.name) +
+            "</button>"
+        );
+        if (s.id === picked.id) btn.classList.add("pick-on");
+        btn.addEventListener("click", function () {
+          picked.id = s.id;
+          addPts.querySelectorAll(".pick").forEach(function (b) {
+            b.classList.remove("pick-on");
+          });
+          btn.classList.add("pick-on");
+          addPts.querySelector("#picked-name").textContent = s.name;
+        });
+        addPts.appendChild(btn);
+      });
+      var form = el(
+        '<form class="stack">' +
           '<label class="lbl">Категория</label>' +
           '<select name="category"></select>' +
           '<label class="lbl">Баллы</label>' +
           '<input name="delta" type="number" required step="1" placeholder="Например 5 или -2" />' +
           '<label class="lbl">Причина</label>' +
           '<input name="reason" maxlength="120" placeholder="За что начислено" />' +
-          '<button class="btn" type="submit">Сохранить</button></form></section>'
+          '<button class="btn" type="submit">Сохранить баллы</button></form>'
       );
-      var sel = addPts.querySelector('[name="studentId"]');
-      g.students.forEach(function (s) {
-        sel.appendChild(
-          el('<option value="' + s.id + '">' + escapeHtml(s.name) + "</option>")
-        );
-      });
-      var catSel = addPts.querySelector('[name="category"]');
+      var catSel = form.querySelector('[name="category"]');
       store.CATEGORIES.forEach(function (c) {
-        catSel.appendChild(el("<option>" + escapeHtml(c) + "</option>"));
+        catSel.appendChild(option(c, c));
       });
-      addPts.querySelector("form").addEventListener("submit", function (e) {
+      form.addEventListener("submit", function (e) {
         e.preventDefault();
-        var fd = new FormData(e.target);
+        var fd = new FormData(form);
         var delta = Number(fd.get("delta"));
-        var studentId = String(fd.get("studentId") || "");
-        if (!delta || !studentId) return;
+        if (!delta || !picked.id) return;
         g.events.unshift({
           id: store.uid(),
-          studentId: studentId,
+          studentId: picked.id,
           delta: delta,
           category: String(fd.get("category") || "Прочее"),
           reason: String(fd.get("reason") || "").trim() || "Без комментария",
@@ -234,8 +275,9 @@
         persist();
         render();
       });
-      root.appendChild(addPts);
+      addPts.appendChild(form);
     }
+    root.appendChild(addPts);
 
     var danger = el(
       '<section class="card"><button class="btn btn-ghost" type="button">Удалить группу</button></section>'
@@ -289,6 +331,72 @@
     });
     head.appendChild(chips);
     root.appendChild(head);
+
+    if (!Array.isArray(s.portfolio)) s.portfolio = [];
+    var port = el(
+      '<section class="card"><h2>Портфолио</h2>' +
+        '<p class="status">Грамоты, дипломы, сертификаты — фото с телефона.</p></section>'
+    );
+    var grid = document.createElement("div");
+    grid.className = "gallery";
+    if (!s.portfolio.length) {
+      port.appendChild(el('<p class="status">Пока нет файлов.</p>'));
+    } else {
+      s.portfolio.forEach(function (item) {
+        var fig = el(
+          '<figure class="shot"><img alt=""/><figcaption></figcaption>' +
+            '<button class="link" type="button">Удалить</button></figure>'
+        );
+        fig.querySelector("img").src = item.image;
+        fig.querySelector("figcaption").textContent =
+          item.title + " · " + formatDate(item.at);
+        fig.querySelector("button").addEventListener("click", function () {
+          s.portfolio = s.portfolio.filter(function (x) {
+            return x.id !== item.id;
+          });
+          persist();
+          render();
+        });
+        grid.appendChild(fig);
+      });
+      port.appendChild(grid);
+    }
+    var portForm = el(
+      '<form class="stack">' +
+        '<input name="title" maxlength="80" placeholder="Название, например Грамота за олимпиаду" />' +
+        '<input name="photo" type="file" accept="image/*" />' +
+        '<button class="btn" type="submit">Добавить в портфолио</button></form>'
+    );
+    portForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var file = portForm.querySelector('[name="photo"]').files[0];
+      if (!file) {
+        alert("Выберите фото грамоты.");
+        return;
+      }
+      var title =
+        String(new FormData(portForm).get("title") || "").trim() || "Грамота";
+      compressImage(file, function (dataUrl) {
+        if (!dataUrl) {
+          alert("Не удалось прочитать фото.");
+          return;
+        }
+        try {
+          s.portfolio.unshift({
+            id: store.uid(),
+            title: title,
+            image: dataUrl,
+            at: new Date().toISOString(),
+          });
+          persist();
+          render();
+        } catch (err) {
+          alert("Не хватило места в браузере. Удалите старые фото.");
+        }
+      });
+    });
+    port.appendChild(portForm);
+    root.appendChild(port);
 
     var hist = el('<section class="card"><h2>История</h2></section>');
     var events = g.events.filter(function (e) {

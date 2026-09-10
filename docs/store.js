@@ -16,6 +16,13 @@
       if (!raw) return empty();
       var data = JSON.parse(raw);
       if (!data || !Array.isArray(data.groups)) return empty();
+      data.groups.forEach(function (g) {
+        if (!Array.isArray(g.students)) g.students = [];
+        if (!Array.isArray(g.events)) g.events = [];
+        g.students.forEach(function (s) {
+          if (!Array.isArray(s.portfolio)) s.portfolio = [];
+        });
+      });
       return data;
     } catch (e) {
       return empty();
