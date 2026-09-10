@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>BMT — VK Mini App</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">BMT</div>
+      <p class="sub">Мини-приложение ВКонтакте. Google Play и App Store не используются.</p>
+    </header>
+
+    <main>
+      <section class="card" id="session">
+        <h1>Сессия VK</h1>
+        <p id="vk-status" class="status">Инициализация VK Bridge…</p>
+        <dl class="meta" id="vk-meta" hidden></dl>
+      </section>
+
+      <section class="card">
+        <h2>Кабинет VK для разработчиков</h2>
+        <ol>
+          <li>
+            Откройте
+            <a href="https://dev.vk.com" target="_blank" rel="noreferrer">dev.vk.com</a>
+            → «Мои приложения» → «Создать» → тип <strong>Mini App</strong>.
+          </li>
+          <li>
+            В настройках приложения укажите <strong>URL</strong> (и URL для разработки) —
+            HTTPS без своего домена, например GitHub Pages:
+            <code>https://ВАШ_ЛОГИН.github.io/bmt/</code>
+          </li>
+          <li>Не ставьте файл CNAME и не покупайте домен.</li>
+          <li>
+            Политика:
+            <code>https://ВАШ_ЛОГИН.github.io/bmt/privacy/</code>
+          </li>
+          <li>
+            Откройте приложение из VK (ссылка вида
+            <code>https://vk.com/appID</code>) — модерация сторов не нужна.
+          </li>
+        </ol>
+      </section>
+
+      <p class="footer">
+        <a href="./privacy/">Политика конфиденциальности</a>
+      </p>
+    </main>
+  </body>
+</html>
