@@ -262,7 +262,7 @@
         "</section>"
     );
     var roleSel = card.querySelector('[name="role"]');
-    ["curator", "head", "deputy", "director"].forEach(function (r) {
+    ["curator", "head", "deputy", "director", "administrator"].forEach(function (r) {
       roleSel.appendChild(option(r, store.roleLabel(r), r === "curator"));
     });
     var groupSel = card.querySelector('[name="groupId"]');
@@ -345,7 +345,7 @@
         var no = el('<button class="btn btn-ghost" type="button">Отклонить</button>');
         ok.addEventListener("click", function () {
           var role = prompt(
-            "Должность (curator/head/deputy/director)",
+            "Должность (curator/head/deputy/director/administrator)",
             req.role || "curator"
           );
           if (role === null) return;
@@ -508,13 +508,13 @@
           var roleBtn = el('<button class="btn btn-soft" type="button">Должность</button>');
           roleBtn.addEventListener("click", function () {
             var next = prompt(
-              "Должность: curator / head / deputy / director",
+              "Должность: curator / head / deputy / director / administrator",
               u.role
             );
             if (next === null) return;
             next = next.trim();
             if (!store.ROLES[next] || next === "admin") {
-              toast("Некорректная должность", true);
+              toast("Некорректная должность. Для полных прав выберите administrator", true);
               return;
             }
             u.role = next;

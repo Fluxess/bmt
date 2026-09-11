@@ -5,12 +5,20 @@
   var CATEGORIES = ["Учёба", "Дисциплина", "Мероприятия", "Прочее"];
   var ROLES = {
     admin: "Главный админ",
+    administrator: "Администратор",
     director: "Директор",
     deputy: "Замдиректора",
     head: "Заведующая",
     curator: "Куратор",
   };
-  var ROLE_ORDER = ["admin", "director", "deputy", "head", "curator"];
+  var ROLE_ORDER = [
+    "admin",
+    "administrator",
+    "director",
+    "deputy",
+    "head",
+    "curator",
+  ];
   var PRESET_GROUPS = [
     "340", "342", "343", "344Г", "346-П", "348Э", "349-П",
     "430-П", "431", "432", "436-П", "437Р", "438Ц", "438Э", "439-П",
@@ -202,6 +210,12 @@
       return Promise.resolve({ ok: false, error: "Заполните логин, пароль и ФИО" });
     }
     if (!ROLES[role]) role = "curator";
+    if (role === "admin") {
+      return Promise.resolve({
+        ok: false,
+        error: "Роль «Главный админ» зарезервирована. Выберите «Администратор».",
+      });
+    }
     if (findUserByLogin(data, loginName)) {
       return Promise.resolve({ ok: false, error: "Такой логин уже занят" });
     }
@@ -273,7 +287,10 @@
       return { ok: false, error: "Логин уже занят" };
     }
     var role = (overrides && overrides.role) || req.role || "curator";
-    if (!ROLES[role] || role === "admin") role = "curator";
+    if (!ROLES[role] || role === "admin") {
+      if (role === "admin") role = "administrator";
+      else role = "curator";
+    }
     var groupIds = [];
     var groupId = (overrides && overrides.groupId) || req.groupId;
     if (groupId) groupIds = [groupId];
@@ -309,6 +326,7 @@
     if (!user) return false;
     return (
       user.role === "admin" ||
+      user.role === "administrator" ||
       user.role === "director" ||
       user.role === "deputy" ||
       user.role === "head"
@@ -316,7 +334,10 @@
   }
 
   function isAdmin(user) {
-    return !!(user && user.role === "admin");
+    return !!(
+      user &&
+      (user.role === "admin" || user.role === "administrator")
+    );
   }
 
   function visibleGroups(data, user) {
