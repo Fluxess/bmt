@@ -1,11 +1,40 @@
 (function () {
   var store = window.BmtStore;
   var root = document.getElementById("app");
-  var state = { screen: "groups", groupId: null, studentId: null };
+  var state = {
+    screen: "groups",
+    groupId: null,
+    studentId: null,
+    search: "",
+    catFilter: "Все",
+  };
   var data = store.load();
 
   function persist() {
-    store.save(data);
+    if (!store.save(data)) {
+      toast("Не хватило места в браузере. Удалите фото или сделайте бэкап.", true);
+      return false;
+    }
+    return true;
+  }
+
+  function toast(message, isError) {
+    var old = document.querySelector(".toast");
+    if (old) old.remove();
+    var node = el(
+      '<div class="toast' +
+        (isError ? " toast-err" : "") +
+        '" role="status">' +
+        escapeHtml(message) +
+        "</div>"
+    );
+    document.body.appendChild(node);
+    setTimeout(function () {
+      node.classList.add("toast-out");
+      setTimeout(function () {
+        node.remove();
+      }, 280);
+    }, 2600);
   }
 
   function groupById(id) {
@@ -26,10 +55,11 @@
     return wrap.firstElementChild;
   }
 
-  function option(value, label) {
+  function option(value, label, selected) {
     var o = document.createElement("option");
     o.value = value;
     o.textContent = label;
+    if (selected) o.selected = true;
     return o;
   }
 
@@ -79,6 +109,12 @@
     }
   }
 
+  function safeName(name) {
+    return String(name || "file")
+      .replace(/[\\/:*?"<>|]+/g, "_")
+      .slice(0, 40);
+  }
+
   function render() {
     root.innerHTML = "";
     if (state.screen === "groups") renderGroups();
@@ -89,32 +125,81 @@
   function renderGroups() {
     var card = el('<section class="card"></section>');
     card.innerHTML =
-      "<h1>Группы</h1>" +
-      '<p class="status">Добавьте учебную группу, затем студентов и начисляйте баллы.</p>';
+      "<h1>Группы техникума</h1>" +
+      '<p class="status">Учёт баллов по учебным группам. Данные хранятся на этом устройстве — сделайте бэкап.</p>';
+
+    var tools = el('<div class="toolbar"></div>');
+    var exportBtn = el('<button class="btn btn-soft" type="button">Скачать бэкап</button>');
+    exportBtn.addEventListener("click", function () {
+      store.downloadText(
+        "bmt-backup-" + new Date().toISOString().slice(0, 10) + ".json",
+        store.exportJson(data),
+        "application/json;charset=utf-8"
+      );
+      toast("Бэкап скачан");
+    });
+    var importLabel = el(
+      '<label class="btn btn-soft file-btn">Восстановить<input type="file" accept="application/json,.json" hidden /></label>'
+    );
+    importLabel.querySelector("input").addEventListener("change", function (e) {
+      var file = e.target.files && e.target.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function () {
+        try {
+          var imported = store.importJson(String(reader.result || ""));
+          if (!confirm("Заменить текущие данные бэкапом? Это необратимо.")) return;
+          data = imported;
+          if (!persist()) return;
+          state.screen = "groups";
+          state.groupId = null;
+          state.studentId = null;
+          toast("Данные восстановлены");
+          render();
+        } catch (err) {
+          toast("Файл бэкапа повреждён", true);
+        }
+      };
+      reader.readAsText(file);
+    });
+    tools.appendChild(exportBtn);
+    tools.appendChild(importLabel);
+    card.appendChild(tools);
+
     var list = document.createElement("div");
     if (!data.groups.length) {
-      list.innerHTML = '<p class="status">Пока нет групп.</p>';
+      list.innerHTML =
+        '<p class="status">Пока нет групп. Создайте первую — например ИС-31.</p>';
     } else {
-      data.groups.forEach(function (g) {
-        var total = store.groupTotal(g);
-        var row = el(
-          '<button class="row" type="button">' +
-            "<span><strong>" +
-            escapeHtml(g.name) +
-            "</strong><small>" +
-            g.students.length +
-            " студ.</small></span>" +
-            '<span class="badge">' +
-            total +
-            "</span></button>"
-        );
-        row.addEventListener("click", function () {
-          state.screen = "group";
-          state.groupId = g.id;
-          render();
+      data.groups
+        .slice()
+        .sort(function (a, b) {
+          return a.name.localeCompare(b.name, "ru");
+        })
+        .forEach(function (g) {
+          var total = store.groupTotal(g);
+          var row = el(
+            '<button class="row" type="button">' +
+              "<span><strong>" +
+              escapeHtml(g.name) +
+              "</strong><small>" +
+              g.students.length +
+              " студ. · " +
+              (g.photos ? g.photos.length : 0) +
+              " фото</small></span>" +
+              '<span class="badge">' +
+              total +
+              "</span></button>"
+          );
+          row.addEventListener("click", function () {
+            state.screen = "group";
+            state.groupId = g.id;
+            state.search = "";
+            state.catFilter = "Все";
+            render();
+          });
+          list.appendChild(row);
         });
-        list.appendChild(row);
-      });
     }
     card.appendChild(list);
 
@@ -126,8 +211,7 @@
     );
     form.addEventListener("submit", function (e) {
       e.preventDefault();
-      var name = new FormData(form).get("groupName");
-      name = name ? String(name).trim() : "";
+      var name = String(new FormData(form).get("groupName") || "").trim();
       if (!name) return;
       data.groups.push({
         id: store.uid(),
@@ -136,7 +220,8 @@
         events: [],
         photos: [],
       });
-      persist();
+      if (!persist()) return;
+      toast("Группа «" + name + "» создана");
       render();
     });
     card.appendChild(form);
@@ -152,6 +237,16 @@
     }
     var ranked = store.rankedStudents(g);
     var cats = store.categoryTotals(g);
+    var q = state.search.trim().toLowerCase();
+    var filtered = ranked.filter(function (item) {
+      if (q && item.student.name.toLowerCase().indexOf(q) === -1) return false;
+      if (state.catFilter !== "Все") {
+        var map = store.categoryTotals(g, item.student.id);
+        return Number(map[state.catFilter] || 0) !== 0;
+      }
+      return true;
+    });
+
     var nav = el(
       '<p class="navline"><button class="link" type="button">← Все группы</button></p>'
     );
@@ -164,7 +259,7 @@
     var head = el(
       '<section class="card"><h1>' +
         escapeHtml(g.name) +
-        "</h1><p class=\"status\">Всего баллов группы: <strong>" +
+        '</h1><p class="status">Всего баллов группы: <strong>' +
         store.groupTotal(g) +
         "</strong></p></section>"
     );
@@ -176,17 +271,79 @@
       );
     });
     head.appendChild(chips);
+
+    var headTools = el('<div class="toolbar"></div>');
+    var renameBtn = el('<button class="btn btn-soft" type="button">Переименовать</button>');
+    renameBtn.addEventListener("click", function () {
+      var next = prompt("Новое название группы", g.name);
+      if (next === null) return;
+      next = next.trim();
+      if (!next) return;
+      g.name = next.slice(0, 40);
+      if (!persist()) return;
+      toast("Группа переименована");
+      render();
+    });
+    var csvBtn = el('<button class="btn btn-soft" type="button">Экспорт CSV</button>');
+    csvBtn.addEventListener("click", function () {
+      store.downloadText(
+        "rating-" + safeName(g.name) + ".csv",
+        store.rankingCsv(g),
+        "text/csv;charset=utf-8"
+      );
+      toast("Рейтинг экспортирован");
+    });
+    var shareBtn = el('<button class="btn btn-soft" type="button">Поделиться</button>');
+    shareBtn.addEventListener("click", shareApp);
+    headTools.appendChild(renameBtn);
+    headTools.appendChild(csvBtn);
+    headTools.appendChild(shareBtn);
+    head.appendChild(headTools);
     root.appendChild(head);
+
     root.appendChild(renderGroupPhotos(g));
+    root.appendChild(renderRecentEvents(g));
 
     var table = el('<section class="card"><h2>Рейтинг</h2></section>');
+    var filters = el(
+      '<div class="stack tight">' +
+        '<input name="search" maxlength="80" placeholder="Поиск по ФИО" />' +
+        '<select name="catFilter"></select></div>'
+    );
+    var searchInput = filters.querySelector('[name="search"]');
+    searchInput.value = state.search;
+    searchInput.addEventListener("input", function () {
+      state.search = searchInput.value;
+      render();
+      var again = root.querySelector('[name="search"]');
+      if (again) {
+        again.focus();
+        var len = again.value.length;
+        again.setSelectionRange(len, len);
+      }
+    });
+    var catSel = filters.querySelector('[name="catFilter"]');
+    ["Все"].concat(store.CATEGORIES).forEach(function (c) {
+      catSel.appendChild(option(c, c === "Все" ? "Все категории" : "Есть баллы: " + c, c === state.catFilter));
+    });
+    catSel.addEventListener("change", function () {
+      state.catFilter = catSel.value;
+      render();
+    });
+    table.appendChild(filters);
+
     if (!ranked.length) {
       table.appendChild(el('<p class="status">Добавьте студентов.</p>'));
+    } else if (!filtered.length) {
+      table.appendChild(el('<p class="status">Никого не найдено по фильтру.</p>'));
     } else {
-      ranked.forEach(function (item, i) {
+      filtered.forEach(function (item) {
+        var place = ranked.findIndex(function (r) {
+          return r.student.id === item.student.id;
+        });
         var row = el(
           '<button class="row" type="button"><span><strong>' +
-            (i + 1) +
+            (place + 1) +
             ". " +
             escapeHtml(item.student.name) +
             "</strong></span><span class=\"badge\">" +
@@ -204,54 +361,82 @@
     root.appendChild(table);
 
     var addSt = el(
-      '<section class="card"><h2>Новый студент</h2>' +
+      '<section class="card"><h2>Студенты</h2>' +
         '<form class="stack">' +
-        '<input name="studentName" required maxlength="80" placeholder="ФИО" />' +
+        '<input name="studentName" maxlength="80" placeholder="ФИО одного студента" />' +
+        '<textarea name="bulk" rows="4" placeholder="Или список целиком — каждое ФИО с новой строки"></textarea>' +
         '<button class="btn" type="submit">Добавить</button></form></section>'
     );
     addSt.querySelector("form").addEventListener("submit", function (e) {
       e.preventDefault();
-      var name = new FormData(e.target).get("studentName");
-      name = name ? String(name).trim() : "";
-      if (!name) return;
-      g.students.push({ id: store.uid(), name: name });
-      persist();
+      var fd = new FormData(e.target);
+      var one = String(fd.get("studentName") || "").trim();
+      var bulk = String(fd.get("bulk") || "");
+      var names = [];
+      if (one) names.push(one);
+      bulk.split(/\r?\n/).forEach(function (line) {
+        var n = line.trim();
+        if (n) names.push(n);
+      });
+      if (!names.length) {
+        toast("Введите ФИО", true);
+        return;
+      }
+      var existing = {};
+      g.students.forEach(function (s) {
+        existing[s.name.toLowerCase()] = true;
+      });
+      var added = 0;
+      names.forEach(function (name) {
+        var key = name.toLowerCase();
+        if (existing[key]) return;
+        existing[key] = true;
+        g.students.push({ id: store.uid(), name: name.slice(0, 80) });
+        added += 1;
+      });
+      if (!added) {
+        toast("Такие студенты уже есть", true);
+        return;
+      }
+      if (!persist()) return;
+      toast("Добавлено: " + added);
       render();
     });
     root.appendChild(addSt);
 
-    var addPts = el(
-      '<section class="card"><h2>Начислить / списать</h2></section>'
-    );
+    var addPts = el('<section class="card"><h2>Начислить / списать</h2></section>');
     if (!g.students.length) {
       addPts.appendChild(
         el('<p class="status">Сначала добавьте студента кнопкой выше.</p>')
       );
     } else {
-      var picked = { id: g.students[0].id };
+      var sorted = g.students.slice().sort(function (a, b) {
+        return a.name.localeCompare(b.name, "ru");
+      });
+      var picked = { id: sorted[0].id };
       var pickLabel = el(
         '<p class="status">Студент: <strong id="picked-name">' +
-          escapeHtml(g.students[0].name) +
+          escapeHtml(sorted[0].name) +
           "</strong></p>"
       );
       addPts.appendChild(pickLabel);
-      g.students.forEach(function (s) {
+      var pickWrap = el('<div class="pick-list"></div>');
+      sorted.forEach(function (s) {
         var btn = el(
-          '<button class="row pick" type="button">' +
-            escapeHtml(s.name) +
-            "</button>"
+          '<button class="row pick" type="button">' + escapeHtml(s.name) + "</button>"
         );
         if (s.id === picked.id) btn.classList.add("pick-on");
         btn.addEventListener("click", function () {
           picked.id = s.id;
-          addPts.querySelectorAll(".pick").forEach(function (b) {
+          pickWrap.querySelectorAll(".pick").forEach(function (b) {
             b.classList.remove("pick-on");
           });
           btn.classList.add("pick-on");
           addPts.querySelector("#picked-name").textContent = s.name;
         });
-        addPts.appendChild(btn);
+        pickWrap.appendChild(btn);
       });
+      addPts.appendChild(pickWrap);
       var form = el(
         '<form class="stack">' +
           '<label class="lbl">Категория</label>' +
@@ -262,9 +447,9 @@
           '<input name="reason" maxlength="120" placeholder="За что начислено" />' +
           '<button class="btn" type="submit">Сохранить баллы</button></form>'
       );
-      var catSel = form.querySelector('[name="category"]');
+      var categorySel = form.querySelector('[name="category"]');
       store.CATEGORIES.forEach(function (c) {
-        catSel.appendChild(option(c, c));
+        categorySel.appendChild(option(c, c));
       });
       form.addEventListener("submit", function (e) {
         e.preventDefault();
@@ -279,7 +464,8 @@
           reason: String(fd.get("reason") || "").trim() || "Без комментария",
           at: new Date().toISOString(),
         });
-        persist();
+        if (!persist()) return;
+        toast("Баллы сохранены: " + formatPts(delta));
         render();
       });
       addPts.appendChild(form);
@@ -294,18 +480,59 @@
       data.groups = data.groups.filter(function (x) {
         return x.id !== g.id;
       });
-      persist();
+      if (!persist()) return;
       state.screen = "groups";
+      toast("Группа удалена");
       render();
     });
     root.appendChild(danger);
+  }
+
+  function renderRecentEvents(g) {
+    var box = el(
+      '<section class="card"><h2>Последние операции</h2></section>'
+    );
+    var recent = g.events.slice(0, 8);
+    if (!recent.length) {
+      box.appendChild(el('<p class="status">Пока нет начислений.</p>'));
+      return box;
+    }
+    recent.forEach(function (ev) {
+      var row = el(
+        '<div class="hist">' +
+          '<span class="' +
+          (ev.delta >= 0 ? "plus" : "minus") +
+          '">' +
+          formatPts(ev.delta) +
+          "</span><span><strong>" +
+          escapeHtml(store.studentName(g, ev.studentId)) +
+          "</strong><small>" +
+          escapeHtml(ev.reason) +
+          " · " +
+          escapeHtml(ev.category) +
+          " · " +
+          formatDate(ev.at) +
+          '</small></span><button class="link" type="button">Отмена</button></div>'
+      );
+      row.querySelector("button").addEventListener("click", function () {
+        if (!confirm("Отменить эту операцию?")) return;
+        g.events = g.events.filter(function (x) {
+          return x.id !== ev.id;
+        });
+        if (!persist()) return;
+        toast("Операция отменена");
+        render();
+      });
+      box.appendChild(row);
+    });
+    return box;
   }
 
   function renderGroupPhotos(g) {
     if (!Array.isArray(g.photos)) g.photos = [];
     var box = el(
       '<section class="card"><h2>Альбом группы</h2>' +
-        '<p class="status">Грамоты, общее фото группы, мероприятия — без карточек студентов.</p></section>'
+        '<p class="status">Грамоты, общее фото группы, мероприятия.</p></section>'
     );
     var grid = document.createElement("div");
     grid.className = "gallery";
@@ -315,7 +542,10 @@
       g.photos.forEach(function (item) {
         var fig = el(
           '<figure class="shot"><img alt=""/><figcaption></figcaption>' +
-            '<button class="link" type="button">Удалить</button></figure>'
+            '<div class="shot-actions">' +
+            '<button class="link" type="button" data-act="rename">Подпись</button>' +
+            '<button class="link" type="button" data-act="del">Удалить</button>' +
+            "</div></figure>"
         );
         fig.querySelector("img").src = item.image;
         fig.querySelector("figcaption").textContent =
@@ -324,11 +554,21 @@
           (item.title || "") +
           " · " +
           formatDate(item.at);
-        fig.querySelector("button").addEventListener("click", function () {
+        fig.querySelector('[data-act="rename"]').addEventListener("click", function () {
+          var next = prompt("Подпись к фото", item.title || "");
+          if (next === null) return;
+          item.title = next.trim().slice(0, 80) || item.kind || "Фото";
+          if (!persist()) return;
+          toast("Подпись обновлена");
+          render();
+        });
+        fig.querySelector('[data-act="del"]').addEventListener("click", function () {
+          if (!confirm("Удалить фото?")) return;
           g.photos = g.photos.filter(function (x) {
             return x.id !== item.id;
           });
-          persist();
+          if (!persist()) return;
+          toast("Фото удалено");
           render();
         });
         grid.appendChild(fig);
@@ -351,7 +591,7 @@
       e.preventDefault();
       var file = form.querySelector('[name="photo"]').files[0];
       if (!file) {
-        alert("Выберите фото.");
+        toast("Выберите фото", true);
         return;
       }
       var fd = new FormData(form);
@@ -359,22 +599,19 @@
       var title = String(fd.get("title") || "").trim() || kind;
       compressImage(file, function (dataUrl) {
         if (!dataUrl) {
-          alert("Не удалось прочитать фото.");
+          toast("Не удалось прочитать фото", true);
           return;
         }
-        try {
-          g.photos.unshift({
-            id: store.uid(),
-            kind: kind,
-            title: title,
-            image: dataUrl,
-            at: new Date().toISOString(),
-          });
-          persist();
-          render();
-        } catch (err) {
-          alert("Не хватило места в браузере. Удалите старые фото.");
-        }
+        g.photos.unshift({
+          id: store.uid(),
+          kind: kind,
+          title: title,
+          image: dataUrl,
+          at: new Date().toISOString(),
+        });
+        if (!persist()) return;
+        toast("Фото добавлено");
+        render();
       });
     });
     box.appendChild(form);
@@ -417,7 +654,68 @@
       );
     });
     head.appendChild(chips);
+
+    var tools = el('<div class="toolbar"></div>');
+    var renameBtn = el('<button class="btn btn-soft" type="button">Переименовать</button>');
+    renameBtn.addEventListener("click", function () {
+      var next = prompt("ФИО студента", s.name);
+      if (next === null) return;
+      next = next.trim();
+      if (!next) return;
+      s.name = next.slice(0, 80);
+      if (!persist()) return;
+      toast("ФИО обновлено");
+      render();
+    });
+    var delBtn = el('<button class="btn btn-ghost" type="button">Удалить студента</button>');
+    delBtn.addEventListener("click", function () {
+      if (!confirm("Удалить «" + s.name + "» и все его баллы?")) return;
+      g.students = g.students.filter(function (x) {
+        return x.id !== s.id;
+      });
+      g.events = g.events.filter(function (x) {
+        return x.studentId !== s.id;
+      });
+      if (!persist()) return;
+      state.screen = "group";
+      toast("Студент удалён");
+      render();
+    });
+    tools.appendChild(renameBtn);
+    tools.appendChild(delBtn);
+    head.appendChild(tools);
     root.appendChild(head);
+
+    var quick = el(
+      '<section class="card"><h2>Быстрое начисление</h2>' +
+        '<form class="stack">' +
+        '<select name="category"></select>' +
+        '<input name="delta" type="number" required step="1" placeholder="Баллы" />' +
+        '<input name="reason" maxlength="120" placeholder="Причина" />' +
+        '<button class="btn" type="submit">Сохранить</button></form></section>'
+    );
+    var qCat = quick.querySelector('[name="category"]');
+    store.CATEGORIES.forEach(function (c) {
+      qCat.appendChild(option(c, c));
+    });
+    quick.querySelector("form").addEventListener("submit", function (e) {
+      e.preventDefault();
+      var fd = new FormData(e.target);
+      var delta = Number(fd.get("delta"));
+      if (!delta) return;
+      g.events.unshift({
+        id: store.uid(),
+        studentId: s.id,
+        delta: delta,
+        category: String(fd.get("category") || "Прочее"),
+        reason: String(fd.get("reason") || "").trim() || "Без комментария",
+        at: new Date().toISOString(),
+      });
+      if (!persist()) return;
+      toast("Баллы: " + formatPts(delta));
+      render();
+    });
+    root.appendChild(quick);
 
     var hist = el('<section class="card"><h2>История баллов</h2></section>');
     var events = g.events.filter(function (e) {
@@ -427,36 +725,80 @@
       hist.appendChild(el('<p class="status">Пока нет операций.</p>'));
     } else {
       events.forEach(function (ev) {
-        hist.appendChild(
-          el(
-            '<div class="hist"><span class="' +
-              (ev.delta >= 0 ? "plus" : "minus") +
-              '">' +
-              formatPts(ev.delta) +
-              "</span><span><strong>" +
-              escapeHtml(ev.reason) +
-              "</strong><small>" +
-              escapeHtml(ev.category) +
-              " · " +
-              formatDate(ev.at) +
-              "</small></span></div>"
-          )
+        var row = el(
+          '<div class="hist"><span class="' +
+            (ev.delta >= 0 ? "plus" : "minus") +
+            '">' +
+            formatPts(ev.delta) +
+            "</span><span><strong>" +
+            escapeHtml(ev.reason) +
+            "</strong><small>" +
+            escapeHtml(ev.category) +
+            " · " +
+            formatDate(ev.at) +
+            '</small></span><button class="link" type="button">Отмена</button></div>'
         );
+        row.querySelector("button").addEventListener("click", function () {
+          if (!confirm("Отменить эту операцию?")) return;
+          g.events = g.events.filter(function (x) {
+            return x.id !== ev.id;
+          });
+          if (!persist()) return;
+          toast("Операция отменена");
+          render();
+        });
+        hist.appendChild(row);
       });
     }
     root.appendChild(hist);
   }
 
+  function shareApp() {
+    var link = window.location.href.split("#")[0];
+    var bridge = window.vkBridge;
+    if (bridge && typeof bridge.send === "function") {
+      bridge
+        .send("VKWebAppShare", { link: link })
+        .then(function () {
+          toast("Ссылка отправлена");
+        })
+        .catch(function () {
+          copyLink(link);
+        });
+      return;
+    }
+    copyLink(link);
+  }
+
+  function copyLink(link) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(link).then(
+        function () {
+          toast("Ссылка скопирована");
+        },
+        function () {
+          prompt("Скопируйте ссылку", link);
+        }
+      );
+    } else {
+      prompt("Скопируйте ссылку", link);
+    }
+  }
+
   function initVk() {
     var status = document.getElementById("vk-status");
     var bridge = window.vkBridge;
-    if (!bridge || typeof bridge.send !== "function") return;
+    if (!bridge || typeof bridge.send !== "function") {
+      if (status) status.textContent = "Баллы учебных групп техникума · локальный режим";
+      return;
+    }
     bridge.send("VKWebAppInit");
     bridge
       .send("VKWebAppGetUserInfo")
       .then(function (user) {
-        if (user && user.first_name) {
-          status.textContent = "Куратор: " + user.first_name + " · баллы групп техникума";
+        if (user && user.first_name && status) {
+          status.textContent =
+            "Куратор: " + user.first_name + " · баллы групп техникума";
         }
       })
       .catch(function () {});
