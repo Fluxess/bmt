@@ -9,6 +9,10 @@
     catFilter: "Все",
   };
   var data = store.load();
+  if (!data.groups.length) {
+    store.ensurePresetGroups(data);
+    store.save(data);
+  }
 
   function persist() {
     if (!store.save(data)) {
@@ -125,10 +129,23 @@
   function renderGroups() {
     var card = el('<section class="card"></section>');
     card.innerHTML =
-      "<h1>Группы техникума</h1>" +
-      '<p class="status">Учёт баллов по учебным группам. Данные хранятся на этом устройстве — сделайте бэкап.</p>';
+      "<h1>Группы ГАПОУ «БМТ»</h1>" +
+      '<p class="status">Бугульминский машиностроительный техникум. Список групп можно подтянуть из расписания <a href="https://bumate.ru/schedule" target="_blank" rel="noreferrer">bumate.ru</a>.</p>';
 
     var tools = el('<div class="toolbar"></div>');
+    var presetBtn = el(
+      '<button class="btn btn-soft" type="button">Загрузить группы с bumate.ru</button>'
+    );
+    presetBtn.addEventListener("click", function () {
+      var added = store.ensurePresetGroups(data);
+      if (!added) {
+        toast("Все группы из расписания уже есть");
+        return;
+      }
+      if (!persist()) return;
+      toast("Добавлено групп: " + added);
+      render();
+    });
     var exportBtn = el('<button class="btn btn-soft" type="button">Скачать бэкап</button>');
     exportBtn.addEventListener("click", function () {
       store.downloadText(
@@ -162,6 +179,7 @@
       };
       reader.readAsText(file);
     });
+    tools.appendChild(presetBtn);
     tools.appendChild(exportBtn);
     tools.appendChild(importLabel);
     card.appendChild(tools);

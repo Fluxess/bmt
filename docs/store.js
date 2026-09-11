@@ -2,6 +2,38 @@
   var KEY = "bmt-points-v1";
   var PHOTO_KINDS = ["Грамота", "Фото группы", "Мероприятие", "Прочее"];
   var CATEGORIES = ["Учёба", "Дисциплина", "Мероприятия", "Прочее"];
+  // Учебные группы из расписания ГАПОУ «БМТ»: https://bumate.ru/schedule
+  var PRESET_GROUPS = [
+    "340",
+    "342",
+    "343",
+    "344Г",
+    "346-П",
+    "348Э",
+    "349-П",
+    "430-П",
+    "431",
+    "432",
+    "436-П",
+    "437Р",
+    "438Ц",
+    "438Э",
+    "439-П",
+    "520-П",
+    "521",
+    "522",
+    "524Г",
+    "526-П",
+    "527Р",
+    "528",
+    "610-П",
+    "611",
+    "612",
+    "615",
+    "616",
+    "618",
+    "619Р",
+  ];
 
   function uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -143,6 +175,29 @@
     return "\uFEFF" + lines.join("\n");
   }
 
+  function ensurePresetGroups(data) {
+    var existing = {};
+    data.groups.forEach(function (g) {
+      existing[String(g.name).toLowerCase()] = true;
+    });
+    var added = 0;
+    PRESET_GROUPS.forEach(function (name) {
+      var key = String(name).toLowerCase();
+      if (existing[key]) return;
+      data.groups.push({
+        id: uid(),
+        name: name,
+        students: [],
+        events: [],
+        photos: [],
+        source: "bumate.ru/schedule",
+      });
+      existing[key] = true;
+      added += 1;
+    });
+    return added;
+  }
+
   function downloadText(filename, text, mime) {
     var blob = new Blob([text], { type: mime || "text/plain;charset=utf-8" });
     var url = URL.createObjectURL(blob);
@@ -160,6 +215,7 @@
   global.BmtStore = {
     PHOTO_KINDS: PHOTO_KINDS,
     CATEGORIES: CATEGORIES,
+    PRESET_GROUPS: PRESET_GROUPS,
     uid: uid,
     load: load,
     save: save,
@@ -172,5 +228,6 @@
     importJson: importJson,
     rankingCsv: rankingCsv,
     downloadText: downloadText,
+    ensurePresetGroups: ensurePresetGroups,
   };
 })(window);
