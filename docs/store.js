@@ -1,38 +1,21 @@
 (function (global) {
   var KEY = "bmt-points-v1";
+  var SESSION_KEY = "bmt-session-v1";
   var PHOTO_KINDS = ["Грамота", "Фото группы", "Мероприятие", "Прочее"];
   var CATEGORIES = ["Учёба", "Дисциплина", "Мероприятия", "Прочее"];
-  // Учебные группы из расписания ГАПОУ «БМТ»: https://bumate.ru/schedule
+  var ROLES = {
+    admin: "Главный админ",
+    director: "Директор",
+    deputy: "Замдиректора",
+    head: "Заведующая",
+    curator: "Куратор",
+  };
+  var ROLE_ORDER = ["admin", "director", "deputy", "head", "curator"];
   var PRESET_GROUPS = [
-    "340",
-    "342",
-    "343",
-    "344Г",
-    "346-П",
-    "348Э",
-    "349-П",
-    "430-П",
-    "431",
-    "432",
-    "436-П",
-    "437Р",
-    "438Ц",
-    "438Э",
-    "439-П",
-    "520-П",
-    "521",
-    "522",
-    "524Г",
-    "526-П",
-    "527Р",
-    "528",
-    "610-П",
-    "611",
-    "612",
-    "615",
-    "616",
-    "618",
-    "619Р",
+    "340", "342", "343", "344Г", "346-П", "348Э", "349-П",
+    "430-П", "431", "432", "436-П", "437Р", "438Ц", "438Э", "439-П",
+    "520-П", "521", "522", "524Г", "526-П", "527Р", "528",
+    "610-П", "611", "612", "615", "616", "618", "619Р",
   ];
 
   function uid() {
@@ -40,20 +23,23 @@
   }
 
   function empty() {
-    return { version: 1, groups: [] };
+    return { version: 2, groups: [], users: [], requests: [] };
   }
 
   function normalize(data) {
-    if (!data || !Array.isArray(data.groups)) return empty();
-    data.version = 1;
+    if (!data || typeof data !== "object") return empty();
+    if (!Array.isArray(data.groups)) data.groups = [];
+    if (!Array.isArray(data.users)) data.users = [];
+    if (!Array.isArray(data.requests)) data.requests = [];
+    data.version = 2;
     data.groups.forEach(function (g) {
       if (!g.id) g.id = uid();
       if (!g.name) g.name = "Группа";
       if (!Array.isArray(g.students)) g.students = [];
       if (!Array.isArray(g.events)) g.events = [];
-        if (!Array.isArray(g.photos)) g.photos = [];
-        if (typeof g.cover !== "string") g.cover = "";
-        g.students.forEach(function (s) {
+      if (!Array.isArray(g.photos)) g.photos = [];
+      if (typeof g.cover !== "string") g.cover = "";
+      g.students.forEach(function (s) {
         if (!s.id) s.id = uid();
         if (!s.name) s.name = "Студент";
         if (Array.isArray(s.portfolio) && s.portfolio.length) {
@@ -69,6 +55,16 @@
         }
         delete s.portfolio;
       });
+    });
+    data.users.forEach(function (u) {
+      if (!u.id) u.id = uid();
+      if (!Array.isArray(u.groupIds)) u.groupIds = [];
+      if (!u.status) u.status = "active";
+      if (!ROLES[u.role]) u.role = "curator";
+    });
+    data.requests.forEach(function (r) {
+      if (!r.id) r.id = uid();
+      if (!r.status) r.status = "pending";
     });
     return data;
   }
@@ -90,6 +86,259 @@
     } catch (e) {
       return false;
     }
+  }
+
+  function toHex(buf) {
+    return Array.from(new Uint8Array(buf))
+      .map(function (b) {
+        return b.toString(16).padStart(2, "0");
+      })
+      .join("");
+  }
+
+  function hashPassword(password, salt) {
+    var enc = new TextEncoder();
+    return crypto.subtle
+      .digest("SHA-256", enc.encode(String(salt) + ":" + String(password)))
+      .then(toHex);
+  }
+
+  function makeSalt() {
+    var arr = new Uint8Array(16);
+    crypto.getRandomValues(arr);
+    return toHex(arr);
+  }
+
+  function ensureAdmin(data) {
+    var salt = "bmt-admin-fixed-salt-v1";
+    return hashPassword("161107Dragov", salt).then(function (hash) {
+      var admin = data.users.find(function (u) {
+        return String(u.login).toLowerCase() === "dragov";
+      });
+      if (!admin) {
+        data.users.unshift({
+          id: uid(),
+          login: "dragov",
+          name: "Dragov · главный админ",
+          role: "admin",
+          salt: salt,
+          passwordHash: hash,
+          groupIds: [],
+          status: "active",
+          createdAt: new Date().toISOString(),
+        });
+      } else {
+        admin.role = "admin";
+        admin.status = "active";
+        admin.salt = salt;
+        admin.passwordHash = hash;
+        admin.name = admin.name || "Dragov · главный админ";
+      }
+      return data;
+    });
+  }
+
+  function getSession() {
+    try {
+      var raw = localStorage.getItem(SESSION_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function setSession(userId) {
+    localStorage.setItem(
+      SESSION_KEY,
+      JSON.stringify({ userId: userId, at: new Date().toISOString() })
+    );
+  }
+
+  function clearSession() {
+    localStorage.removeItem(SESSION_KEY);
+  }
+
+  function currentUser(data) {
+    var session = getSession();
+    if (!session || !session.userId) return null;
+    var user = data.users.find(function (u) {
+      return u.id === session.userId && u.status === "active";
+    });
+    return user || null;
+  }
+
+  function findUserByLogin(data, login) {
+    var key = String(login || "").trim().toLowerCase();
+    return data.users.find(function (u) {
+      return String(u.login).toLowerCase() === key;
+    });
+  }
+
+  function login(data, loginName, password) {
+    var user = findUserByLogin(data, loginName);
+    if (!user || user.status !== "active") {
+      return Promise.resolve({ ok: false, error: "Неверный логин или пароль" });
+    }
+    return hashPassword(password, user.salt).then(function (hash) {
+      if (hash !== user.passwordHash) {
+        return { ok: false, error: "Неверный логин или пароль" };
+      }
+      setSession(user.id);
+      return { ok: true, user: user };
+    });
+  }
+
+  function logout() {
+    clearSession();
+  }
+
+  function createUser(data, opts) {
+    var loginName = String(opts.login || "").trim().toLowerCase();
+    var password = String(opts.password || "");
+    var name = String(opts.name || "").trim();
+    var role = opts.role || "curator";
+    if (!loginName || !password || !name) {
+      return Promise.resolve({ ok: false, error: "Заполните логин, пароль и ФИО" });
+    }
+    if (!ROLES[role]) role = "curator";
+    if (findUserByLogin(data, loginName)) {
+      return Promise.resolve({ ok: false, error: "Такой логин уже занят" });
+    }
+    var salt = makeSalt();
+    return hashPassword(password, salt).then(function (hash) {
+      var user = {
+        id: uid(),
+        login: loginName,
+        name: name.slice(0, 80),
+        role: role,
+        salt: salt,
+        passwordHash: hash,
+        groupIds: Array.isArray(opts.groupIds) ? opts.groupIds.slice() : [],
+        status: "active",
+        createdAt: new Date().toISOString(),
+      };
+      data.users.push(user);
+      return { ok: true, user: user };
+    });
+  }
+
+  function submitRegistration(data, opts) {
+    var loginName = String(opts.login || "").trim().toLowerCase();
+    var password = String(opts.password || "");
+    var name = String(opts.name || "").trim();
+    var role = opts.role || "curator";
+    var groupId = opts.groupId || "";
+    var comment = String(opts.comment || "").trim();
+    if (!loginName || !password || !name) {
+      return Promise.resolve({ ok: false, error: "Заполните ФИО, логин и пароль" });
+    }
+    if (findUserByLogin(data, loginName)) {
+      return Promise.resolve({ ok: false, error: "Такой логин уже есть" });
+    }
+    var pending = data.requests.some(function (r) {
+      return r.status === "pending" && String(r.login).toLowerCase() === loginName;
+    });
+    if (pending) {
+      return Promise.resolve({ ok: false, error: "Заявка с этим логином уже на рассмотрении" });
+    }
+    if (!ROLES[role] || role === "admin") role = "curator";
+    var salt = makeSalt();
+    return hashPassword(password, salt).then(function (hash) {
+      data.requests.unshift({
+        id: uid(),
+        login: loginName,
+        name: name.slice(0, 80),
+        role: role,
+        groupId: groupId || "",
+        comment: comment.slice(0, 200),
+        salt: salt,
+        passwordHash: hash,
+        status: "pending",
+        createdAt: new Date().toISOString(),
+      });
+      return { ok: true };
+    });
+  }
+
+  function approveRequest(data, requestId, overrides) {
+    var req = data.requests.find(function (r) {
+      return r.id === requestId;
+    });
+    if (!req || req.status !== "pending") {
+      return { ok: false, error: "Заявка не найдена" };
+    }
+    if (findUserByLogin(data, req.login)) {
+      req.status = "rejected";
+      return { ok: false, error: "Логин уже занят" };
+    }
+    var role = (overrides && overrides.role) || req.role || "curator";
+    if (!ROLES[role] || role === "admin") role = "curator";
+    var groupIds = [];
+    var groupId = (overrides && overrides.groupId) || req.groupId;
+    if (groupId) groupIds = [groupId];
+    data.users.push({
+      id: uid(),
+      login: req.login,
+      name: req.name,
+      role: role,
+      salt: req.salt,
+      passwordHash: req.passwordHash,
+      groupIds: groupIds,
+      status: "active",
+      createdAt: new Date().toISOString(),
+    });
+    req.status = "approved";
+    req.resolvedAt = new Date().toISOString();
+    return { ok: true };
+  }
+
+  function rejectRequest(data, requestId) {
+    var req = data.requests.find(function (r) {
+      return r.id === requestId;
+    });
+    if (!req || req.status !== "pending") {
+      return { ok: false, error: "Заявка не найдена" };
+    }
+    req.status = "rejected";
+    req.resolvedAt = new Date().toISOString();
+    return { ok: true };
+  }
+
+  function canSeeAllGroups(user) {
+    if (!user) return false;
+    return (
+      user.role === "admin" ||
+      user.role === "director" ||
+      user.role === "deputy" ||
+      user.role === "head"
+    );
+  }
+
+  function isAdmin(user) {
+    return !!(user && user.role === "admin");
+  }
+
+  function visibleGroups(data, user) {
+    if (!user) return [];
+    if (canSeeAllGroups(user)) return data.groups;
+    var set = {};
+    (user.groupIds || []).forEach(function (id) {
+      set[id] = true;
+    });
+    return data.groups.filter(function (g) {
+      return set[g.id];
+    });
+  }
+
+  function canAccessGroup(user, groupId) {
+    if (!user) return false;
+    if (canSeeAllGroups(user)) return true;
+    return (user.groupIds || []).indexOf(groupId) >= 0;
+  }
+
+  function roleLabel(role) {
+    return ROLES[role] || role;
   }
 
   function studentTotal(group, studentId) {
@@ -142,9 +391,23 @@
   function exportJson(data) {
     return JSON.stringify(
       {
-        version: 1,
+        version: 2,
         exportedAt: new Date().toISOString(),
         groups: data.groups,
+        users: data.users.map(function (u) {
+          return {
+            id: u.id,
+            login: u.login,
+            name: u.name,
+            role: u.role,
+            groupIds: u.groupIds,
+            status: u.status,
+            createdAt: u.createdAt,
+            salt: u.salt,
+            passwordHash: u.passwordHash,
+          };
+        }),
+        requests: data.requests,
       },
       null,
       2
@@ -152,8 +415,7 @@
   }
 
   function importJson(text) {
-    var parsed = JSON.parse(text);
-    return normalize(parsed);
+    return normalize(JSON.parse(text));
   }
 
   function rankingCsv(group) {
@@ -191,6 +453,7 @@
         students: [],
         events: [],
         photos: [],
+        cover: "",
         source: "bumate.ru/schedule",
       });
       existing[key] = true;
@@ -217,9 +480,24 @@
     PHOTO_KINDS: PHOTO_KINDS,
     CATEGORIES: CATEGORIES,
     PRESET_GROUPS: PRESET_GROUPS,
+    ROLES: ROLES,
+    ROLE_ORDER: ROLE_ORDER,
     uid: uid,
     load: load,
     save: save,
+    ensureAdmin: ensureAdmin,
+    login: login,
+    logout: logout,
+    currentUser: currentUser,
+    createUser: createUser,
+    submitRegistration: submitRegistration,
+    approveRequest: approveRequest,
+    rejectRequest: rejectRequest,
+    canSeeAllGroups: canSeeAllGroups,
+    isAdmin: isAdmin,
+    visibleGroups: visibleGroups,
+    canAccessGroup: canAccessGroup,
+    roleLabel: roleLabel,
     studentTotal: studentTotal,
     groupTotal: groupTotal,
     categoryTotals: categoryTotals,

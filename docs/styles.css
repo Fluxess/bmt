@@ -253,9 +253,29 @@ textarea {
   border-color: rgba(226, 117, 133, 0.55);
 }
 
-.toast-out {
-  opacity: 0;
-  transform: translateX(-50%) translateY(8px);
+.account-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.account-bar small {
+  margin-top: 2px;
+}
+
+.admin-item {
+  padding: 12px 0;
+  border-top: 1px solid rgba(216, 178, 188, 0.14);
+}
+
+.admin-item:first-of-type {
+  border-top: 0;
+}
+
+.admin-item .toolbar {
+  margin-top: 8px;
 }
 
 .chips {
