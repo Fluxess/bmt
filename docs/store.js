@@ -51,8 +51,9 @@
       if (!g.name) g.name = "Группа";
       if (!Array.isArray(g.students)) g.students = [];
       if (!Array.isArray(g.events)) g.events = [];
-      if (!Array.isArray(g.photos)) g.photos = [];
-      g.students.forEach(function (s) {
+        if (!Array.isArray(g.photos)) g.photos = [];
+        if (typeof g.cover !== "string") g.cover = "";
+        g.students.forEach(function (s) {
         if (!s.id) s.id = uid();
         if (!s.name) s.name = "Студент";
         if (Array.isArray(s.portfolio) && s.portfolio.length) {

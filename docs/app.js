@@ -195,20 +195,24 @@
           return a.name.localeCompare(b.name, "ru");
         })
         .forEach(function (g) {
-          var total = store.groupTotal(g);
-          var row = el(
-            '<button class="row" type="button">' +
-              "<span><strong>" +
-              escapeHtml(g.name) +
-              "</strong><small>" +
-              g.students.length +
-              " студ. · " +
-              (g.photos ? g.photos.length : 0) +
-              " фото</small></span>" +
-              '<span class="badge">' +
-              total +
-              "</span></button>"
-          );
+        var total = store.groupTotal(g);
+        var row = el(
+          '<button class="row" type="button">' +
+            (g.cover
+              ? '<img class="row-cover" alt="" />'
+              : '<span class="row-cover row-cover-empty"></span>') +
+            "<span class=\"row-text\"><strong>" +
+            escapeHtml(g.name) +
+            "</strong><small>" +
+            g.students.length +
+            " студ. · " +
+            (g.photos ? g.photos.length : 0) +
+            " фото</small></span>" +
+            '<span class="badge">' +
+            total +
+            "</span></button>"
+        );
+        if (g.cover) row.querySelector("img").src = g.cover;
           row.addEventListener("click", function () {
             state.screen = "group";
             state.groupId = g.id;
@@ -274,12 +278,15 @@
     });
     root.appendChild(nav);
 
-    var head = el(
-      '<section class="card"><h1>' +
-        escapeHtml(g.name) +
-        '</h1><p class="status">Всего баллов группы: <strong>' +
-        store.groupTotal(g) +
-        "</strong></p></section>"
+    var head = el('<section class="card head-card"></section>');
+    var headMain = el('<div class="head-main"></div>');
+    headMain.appendChild(el("<h1>" + escapeHtml(g.name) + "</h1>"));
+    headMain.appendChild(
+      el(
+        '<p class="status">Всего баллов группы: <strong>' +
+          store.groupTotal(g) +
+          "</strong></p>"
+      )
     );
     var chips = document.createElement("div");
     chips.className = "chips";
@@ -288,7 +295,7 @@
         el('<span class="chip">' + escapeHtml(c) + ": " + cats[c] + "</span>")
       );
     });
-    head.appendChild(chips);
+    headMain.appendChild(chips);
 
     var headTools = el('<div class="toolbar"></div>');
     var renameBtn = el('<button class="btn btn-soft" type="button">Переименовать</button>');
@@ -316,7 +323,40 @@
     headTools.appendChild(renameBtn);
     headTools.appendChild(csvBtn);
     headTools.appendChild(shareBtn);
-    head.appendChild(headTools);
+    headMain.appendChild(headTools);
+
+    var coverWrap = el('<div class="group-cover"></div>');
+    if (g.cover) {
+      var coverImg = el('<img class="group-cover-img" alt="Фото группы" />');
+      coverImg.src = g.cover;
+      coverWrap.appendChild(coverImg);
+      var coverActions = el('<div class="group-cover-actions"></div>');
+      var changeCover = el('<button class="link" type="button">Сменить</button>');
+      var clearCover = el('<button class="link" type="button">Убрать</button>');
+      changeCover.addEventListener("click", function () {
+        pickCover(g);
+      });
+      clearCover.addEventListener("click", function () {
+        g.cover = "";
+        if (!persist()) return;
+        toast("Фото группы убрано");
+        render();
+      });
+      coverActions.appendChild(changeCover);
+      coverActions.appendChild(clearCover);
+      coverWrap.appendChild(coverActions);
+    } else {
+      var addCover = el(
+        '<button class="group-cover-empty" type="button">+ Фото группы</button>'
+      );
+      addCover.addEventListener("click", function () {
+        pickCover(g);
+      });
+      coverWrap.appendChild(addCover);
+    }
+
+    head.appendChild(headMain);
+    head.appendChild(coverWrap);
     root.appendChild(head);
 
     root.appendChild(renderGroupPhotos(g));
@@ -506,6 +546,40 @@
     root.appendChild(danger);
   }
 
+  function pickCover(g) {
+    var input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.addEventListener("change", function () {
+      var file = input.files && input.files[0];
+      if (!file) return;
+      compressImage(file, function (dataUrl) {
+        if (!dataUrl) {
+          toast("Не удалось прочитать фото", true);
+          return;
+        }
+        g.cover = dataUrl;
+        if (!Array.isArray(g.photos)) g.photos = [];
+        var already = g.photos.some(function (p) {
+          return p.kind === "Фото группы" && p.image === dataUrl;
+        });
+        if (!already) {
+          g.photos.unshift({
+            id: store.uid(),
+            kind: "Фото группы",
+            title: "Фото группы " + g.name,
+            image: dataUrl,
+            at: new Date().toISOString(),
+          });
+        }
+        if (!persist()) return;
+        toast("Фото группы установлено");
+        render();
+      });
+    });
+    input.click();
+  }
+
   function renderRecentEvents(g) {
     var box = el(
       '<section class="card"><h2>Последние операции</h2></section>'
@@ -627,6 +701,9 @@
           image: dataUrl,
           at: new Date().toISOString(),
         });
+        if (kind === "Фото группы" && !g.cover) {
+          g.cover = dataUrl;
+        }
         if (!persist()) return;
         toast("Фото добавлено");
         render();
