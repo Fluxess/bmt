@@ -253,6 +253,11 @@ textarea {
   border-color: rgba(226, 117, 133, 0.55);
 }
 
+.toast-out {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
+}
+
 .account-bar {
   display: flex;
   justify-content: space-between;
