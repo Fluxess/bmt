@@ -7,9 +7,17 @@
     studentId: null,
     search: "",
     catFilter: "Все",
-    adminTab: "overview",
     userSearch: "",
     logSearch: "",
+  };
+
+  var ADMIN_PAGES = {
+    overview: true,
+    requests: true,
+    users: true,
+    assignments: true,
+    logs: true,
+    create: true,
   };
   var data = store.load();
   if (!data.groups.length) {
@@ -132,87 +140,268 @@
       .slice(0, 40);
   }
 
+  function pageTitle(screen) {
+    var titles = {
+      login: "Вход",
+      register: "Регистрация",
+      groups: "Группы",
+      group: "Группа",
+      student: "Студент",
+      cabinet: "Личный кабинет",
+      overview: "Обзор",
+      requests: "Заявки",
+      users: "Кабинеты",
+      assignments: "Кураторы",
+      logs: "Логи",
+      create: "Создать кабинет",
+    };
+    return titles[screen] || "BMT";
+  }
+
   function updateHeader() {
     var status = document.getElementById("vk-status");
     if (!status) return;
+    document.title = pageTitle(state.screen) + " · BMT";
     if (!me) {
       status.textContent = "ГАПОУ «БМТ» · войдите в личный кабинет";
       return;
     }
     status.textContent =
-      me.name + " · " + store.roleLabel(me.role) + " · личный кабинет";
+      pageTitle(state.screen) +
+      " · " +
+      me.name +
+      " · " +
+      store.roleLabel(me.role);
   }
 
-  function renderAccountBar() {
-    if (!me) return;
-    var bar = el(
-      '<section class="card account-bar">' +
-        "<div><strong>" +
-        escapeHtml(me.name) +
-        '</strong><small>' +
-        escapeHtml(store.roleLabel(me.role)) +
-        " · @" +
-        escapeHtml(me.login) +
-        "</small></div>" +
-        '<div class="toolbar"></div></section>'
-    );
-    var tools = bar.querySelector(".toolbar");
-    if (store.isAdmin(me)) {
-      var adminBtn = el('<button class="btn btn-soft" type="button">Админ-кабинет</button>');
-      adminBtn.addEventListener("click", function () {
-        state.screen = "admin";
-        render();
-      });
-      tools.appendChild(adminBtn);
+  function parseHash() {
+    var raw = (location.hash || "").replace(/^#\/?/, "");
+    var parts = raw.split("/").filter(Boolean);
+    var screen = (parts[0] || "").toLowerCase();
+    if (!screen) return { screen: "", groupId: null, studentId: null };
+    if (screen === "group" && parts[1]) {
+      return { screen: "group", groupId: parts[1], studentId: null };
     }
-    if (state.screen !== "groups" && state.screen !== "login" && state.screen !== "register") {
-      var homeBtn = el('<button class="btn btn-soft" type="button">Мои группы</button>');
-      homeBtn.addEventListener("click", function () {
-        state.screen = "groups";
-        state.groupId = null;
-        state.studentId = null;
-        render();
-      });
-      tools.appendChild(homeBtn);
+    if (screen === "student" && parts[1] && parts[2]) {
+      return { screen: "student", groupId: parts[1], studentId: parts[2] };
     }
-    var outBtn = el('<button class="btn btn-ghost" type="button">Выйти</button>');
-    outBtn.addEventListener("click", function () {
+    if (screen === "admin-groups" || screen === "curators") {
+      screen = "assignments";
+    }
+    if (screen === "admin") screen = "overview";
+    return { screen: screen, groupId: null, studentId: null };
+  }
+
+  function defaultScreen() {
+    if (!me) return "login";
+    return store.isAdmin(me) ? "overview" : "groups";
+  }
+
+  function applyRouteFromHash(forceDefault) {
+    var route = parseHash();
+    if (!route.screen || forceDefault) {
+      route = {
+        screen: defaultScreen(),
+        groupId: null,
+        studentId: null,
+      };
+      history.replaceState(null, "", "#/" + route.screen);
+    }
+    if (!me && route.screen !== "login" && route.screen !== "register") {
+      route = { screen: "login", groupId: null, studentId: null };
+      history.replaceState(null, "", "#/login");
+    }
+    if (me && (route.screen === "login" || route.screen === "register")) {
+      route = {
+        screen: defaultScreen(),
+        groupId: null,
+        studentId: null,
+      };
+      history.replaceState(null, "", "#/" + route.screen);
+    }
+    if (ADMIN_PAGES[route.screen] && me && !store.isAdmin(me)) {
+      route = { screen: "groups", groupId: null, studentId: null };
+      history.replaceState(null, "", "#/groups");
+    }
+    state.screen = route.screen;
+    state.groupId = route.groupId;
+    state.studentId = route.studentId;
+  }
+
+  function navigate(path, replace) {
+    var clean = String(path || "")
+      .replace(/^#\/?/, "")
+      .replace(/^\//, "");
+    if (!clean) clean = defaultScreen();
+    var hash = "#/" + clean;
+    if (replace) {
+      history.replaceState(null, "", hash);
+      applyRouteFromHash(false);
+      render();
+      return;
+    }
+    if (location.hash === hash) {
+      applyRouteFromHash(false);
+      render();
+      return;
+    }
+    location.hash = hash;
+  }
+
+  function logoutUser() {
+    if (me) {
       logAction("Выход", "Выход из кабинета · роль " + store.roleLabel(me.role), {
         target: "@" + me.login,
       });
       persist();
-      store.logout();
-      me = null;
-      state.screen = "login";
-      toast("Вы вышли из кабинета");
-      render();
+    }
+    store.logout();
+    me = null;
+    toast("Вы вышли из кабинета");
+    navigate("login", true);
+  }
+
+  function renderMainNav() {
+    if (!me) return;
+    var navItems = [{ id: "groups", label: "Группы", path: "groups" }];
+    if (store.isAdmin(me)) {
+      var pending = data.requests.filter(function (r) {
+        return r.status === "pending";
+      }).length;
+      var stats = store.adminStats(data);
+      navItems = navItems.concat([
+        { id: "overview", label: "Обзор", path: "overview" },
+        {
+          id: "requests",
+          label: "Заявки" + (pending ? " (" + pending + ")" : ""),
+          path: "requests",
+        },
+        { id: "users", label: "Кабинеты", path: "users" },
+        { id: "assignments", label: "Кураторы", path: "assignments" },
+        {
+          id: "logs",
+          label: "Логи" + (stats.logs ? " (" + stats.logs + ")" : ""),
+          path: "logs",
+        },
+        { id: "create", label: "Создать", path: "create" },
+      ]);
+    }
+    navItems.push({ id: "cabinet", label: "Личный кабинет", path: "cabinet" });
+
+    var active = state.screen;
+    if (active === "group" || active === "student") active = "groups";
+
+    var nav = el('<nav class="page-nav" aria-label="Разделы"></nav>');
+    navItems.forEach(function (item) {
+      var btn = el(
+        '<button class="page-nav-link' +
+          (active === item.id ? " is-active" : "") +
+          '" type="button">' +
+          escapeHtml(item.label) +
+          "</button>"
+      );
+      btn.addEventListener("click", function () {
+        navigate(item.path);
+      });
+      nav.appendChild(btn);
     });
-    tools.appendChild(outBtn);
-    root.appendChild(bar);
+    root.appendChild(nav);
   }
 
   function render() {
     root.innerHTML = "";
     refreshMe();
+    applyRouteFromHash(false);
     updateHeader();
+    try {
+      window.scrollTo(0, 0);
+    } catch (e) {}
     if (!me) {
       if (state.screen === "register") renderRegister();
       else renderLogin();
       return;
     }
-    if (state.screen === "admin") {
-      if (!store.isAdmin(me)) {
-        state.screen = "groups";
-      } else {
-        renderAccountBar();
-        renderAdmin();
-        return;
-      }
-    }
-    renderAccountBar();
+    renderMainNav();
     if (state.screen === "groups") renderGroups();
     else if (state.screen === "group") renderGroup();
-    else renderStudent();
+    else if (state.screen === "student") renderStudent();
+    else if (state.screen === "cabinet") renderCabinet();
+    else if (state.screen === "overview") renderAdminOverview(store.adminStats(data));
+    else if (state.screen === "requests") {
+      renderAdminRequests(
+        data.requests.filter(function (r) {
+          return r.status === "pending";
+        })
+      );
+    } else if (state.screen === "users") renderAdminUsers();
+    else if (state.screen === "assignments") renderAdminGroups();
+    else if (state.screen === "logs") renderAdminLogs();
+    else if (state.screen === "create") renderAdminCreate();
+    else navigate("groups", true);
+  }
+
+  function renderCabinet() {
+    var groups = store.visibleGroups(data, me);
+    var card = el(
+      '<section class="card">' +
+        "<h1>Личный кабинет</h1>" +
+        '<p class="status">Данные вашего аккаунта и быстрые действия.</p>' +
+        '<div class="stat-grid">' +
+        '<div class="stat-card"><small>ФИО</small><strong>' +
+        escapeHtml(me.name) +
+        "</strong></div>" +
+        '<div class="stat-card"><small>Логин</small><strong>@' +
+        escapeHtml(me.login) +
+        "</strong></div>" +
+        '<div class="stat-card"><small>Должность</small><strong>' +
+        escapeHtml(store.roleLabel(me.role)) +
+        "</strong></div>" +
+        '<div class="stat-card"><small>Доступных групп</small><strong>' +
+        groups.length +
+        "</strong></div></div></section>"
+    );
+    root.appendChild(card);
+
+    var list = el('<section class="card"><h2>Ваши группы</h2></section>');
+    if (!groups.length) {
+      list.appendChild(el('<p class="status">Нет прикреплённых групп.</p>'));
+    } else {
+      groups.forEach(function (g) {
+        var row = el(
+          '<button class="row" type="button"><div><strong>' +
+            escapeHtml(g.name) +
+            "</strong><small>" +
+            (g.students || []).length +
+            " студ.</small></div><span>" +
+            formatPts(store.groupTotal(g)) +
+            "</span></button>"
+        );
+        row.addEventListener("click", function () {
+          navigate("group/" + g.id);
+        });
+        list.appendChild(row);
+      });
+    }
+    root.appendChild(list);
+
+    var actions = el('<section class="card"><h2>Действия</h2><div class="toolbar"></div></section>');
+    var tools = actions.querySelector(".toolbar");
+    var groupsBtn = el('<button class="btn btn-soft" type="button">Открыть группы</button>');
+    groupsBtn.addEventListener("click", function () {
+      navigate("groups");
+    });
+    tools.appendChild(groupsBtn);
+    if (store.isAdmin(me)) {
+      var logsBtn = el('<button class="btn btn-soft" type="button">Журнал логов</button>');
+      logsBtn.addEventListener("click", function () {
+        navigate("logs");
+      });
+      tools.appendChild(logsBtn);
+    }
+    var outBtn = el('<button class="btn btn-ghost" type="button">Выйти</button>');
+    outBtn.addEventListener("click", logoutUser);
+    tools.appendChild(outBtn);
+    root.appendChild(actions);
   }
 
   function renderLogin() {
@@ -230,8 +419,7 @@
         "</section>"
     );
     card.querySelector("#go-reg").addEventListener("click", function () {
-      state.screen = "register";
-      render();
+      navigate("register", true);
     });
     card.querySelector("form").addEventListener("submit", function (e) {
       e.preventDefault();
@@ -253,9 +441,8 @@
           target: "@" + me.login,
         });
         persist();
-        state.screen = store.isAdmin(me) ? "admin" : "groups";
         toast("Добро пожаловать, " + me.name);
-        render();
+        navigate(store.isAdmin(me) ? "overview" : "groups", true);
       });
     });
     root.appendChild(card);
@@ -298,8 +485,7 @@
         groupSel.appendChild(option(g.id, g.name));
       });
     card.querySelector("#go-login").addEventListener("click", function () {
-      state.screen = "login";
-      render();
+      navigate("login", true);
     });
     card.querySelector("form").addEventListener("submit", function (e) {
       e.preventDefault();
@@ -339,58 +525,26 @@
           );
           persist();
           toast("Заявка отправлена. Ждите решения админа.");
-          state.screen = "login";
-          render();
+          navigate("login", true);
         });
     });
     root.appendChild(card);
   }
 
-  function renderAdmin() {
-    var stats = store.adminStats(data);
-    var pending = data.requests.filter(function (r) {
-      return r.status === "pending";
-    });
-    var tabs = [
-      ["overview", "Обзор"],
-      ["requests", "Заявки (" + pending.length + ")"],
-      ["users", "Кабинеты"],
-      ["groups", "Группы"],
-      ["logs", "Логи (" + stats.logs + ")"],
-      ["create", "Создать"],
-    ];
-
-    var head = el(
-      '<section class="card"><h1>Админ-кабинет</h1>' +
-        '<p class="status">Управление кабинетами, заявками и журналом действий.</p>' +
-        '<div class="admin-tabs"></div></section>'
+  function renderAdminPageHead(title, subtitle) {
+    root.appendChild(
+      el(
+        "<section class=\"card\"><h1>" +
+          escapeHtml(title) +
+          "</h1><p class=\"status\">" +
+          escapeHtml(subtitle) +
+          "</p></section>"
+      )
     );
-    var tabBar = head.querySelector(".admin-tabs");
-    tabs.forEach(function (t) {
-      var btn = el(
-        '<button class="btn btn-soft' +
-          (state.adminTab === t[0] ? " tab-on" : "") +
-          '" type="button">' +
-          t[1] +
-          "</button>"
-      );
-      btn.addEventListener("click", function () {
-        state.adminTab = t[0];
-        render();
-      });
-      tabBar.appendChild(btn);
-    });
-    root.appendChild(head);
-
-    if (state.adminTab === "overview") renderAdminOverview(stats);
-    else if (state.adminTab === "requests") renderAdminRequests(pending);
-    else if (state.adminTab === "users") renderAdminUsers();
-    else if (state.adminTab === "groups") renderAdminGroups();
-    else if (state.adminTab === "logs") renderAdminLogs();
-    else renderAdminCreate();
   }
 
   function renderAdminOverview(stats) {
+    renderAdminPageHead("Обзор", "Сводка по кабинетам, группам и журналу действий.");
     var card = el('<section class="card"><h2>Сводка</h2><div class="stat-grid"></div></section>');
     var grid = card.querySelector(".stat-grid");
     [
@@ -455,8 +609,9 @@
   }
 
   function renderAdminRequests(pending) {
+    renderAdminPageHead("Заявки", "Заявки на создание личного кабинета.");
     var reqCard = el(
-      '<section class="card"><h2>Заявки на регистрацию (' +
+      '<section class="card"><h2>Ожидают решения (' +
         pending.length +
         ")</h2></section>"
     );
@@ -583,8 +738,9 @@
   }
 
   function renderAdminCreate() {
+    renderAdminPageHead("Создать кабинет", "Ручное создание кабинета сотрудника.");
     var createCard = el(
-      '<section class="card"><h2>Создать кабинет</h2>' +
+      '<section class="card"><h2>Новый кабинет</h2>' +
         '<form class="stack">' +
         '<input name="name" required maxlength="80" placeholder="ФИО" />' +
         '<input name="login" required maxlength="40" placeholder="Логин" />' +
@@ -645,14 +801,14 @@
           );
           if (!persist()) return;
           toast("Кабинет @" + res.user.login + " создан");
-          state.adminTab = "users";
-          render();
+          navigate("users", true);
         });
     });
     root.appendChild(createCard);
   }
 
   function renderAdminUsers() {
+    renderAdminPageHead("Кабинеты", "Управление пользователями, ролями и доступом.");
     var usersCard = el(
       '<section class="card"><h2>Все кабинеты (' +
         data.users.length +
@@ -805,9 +961,9 @@
   }
 
   function renderAdminGroups() {
+    renderAdminPageHead("Кураторы", "Кто за какой группой закреплён.");
     var card = el(
-      '<section class="card"><h2>Группы и кураторы</h2>' +
-        '<p class="status">Кто за какой группой закреплён.</p></section>'
+      '<section class="card"><h2>Группы и кураторы</h2></section>'
     );
     data.groups
       .slice()
@@ -842,9 +998,12 @@
   }
 
   function renderAdminLogs() {
+    renderAdminPageHead(
+      "Логи",
+      "Журнал действий. До 800 записей: IP, платформа, UA, экран, язык, часовой пояс, сеть, VK-параметры."
+    );
     var card = el(
-      '<section class="card"><h2>Журнал действий</h2>' +
-        '<p class="status">Видят администраторы. До 800 записей. Пишутся IP (публичный), платформа, UA, экран, язык, часовой пояс, сеть, VK-параметры и детали действия.</p>' +
+      '<section class="card"><h2>Журнал</h2>' +
         '<div class="toolbar"></div>' +
         '<input class="stack-input" name="logSearch" maxlength="80" placeholder="Поиск по логам" /></section>'
     );
@@ -1009,11 +1168,8 @@
               );
               if (!persist()) return;
               refreshMe();
-              state.screen = "groups";
-              state.groupId = null;
-              state.studentId = null;
               toast("Данные восстановлены");
-              render();
+              navigate("groups", true);
             });
           } catch (err) {
             toast("Файл бэкапа повреждён", true);
@@ -1056,11 +1212,9 @@
           );
           if (g.cover) row.querySelector("img").src = g.cover;
           row.addEventListener("click", function () {
-            state.screen = "group";
-            state.groupId = g.id;
             state.search = "";
             state.catFilter = "Все";
-            render();
+            navigate("group/" + g.id);
           });
           list.appendChild(row);
         });
@@ -1103,8 +1257,7 @@
   function renderGroup() {
     var g = groupById(state.groupId);
     if (!g || !store.canAccessGroup(me, g.id)) {
-      state.screen = "groups";
-      render();
+      navigate("groups", true);
       return;
     }
     var ranked = store.rankedStudents(g);
@@ -1123,8 +1276,7 @@
       '<p class="navline"><button class="link" type="button">← Все группы</button></p>'
     );
     nav.querySelector("button").addEventListener("click", function () {
-      state.screen = "groups";
-      render();
+      navigate("groups");
     });
     root.appendChild(nav);
 
@@ -1277,9 +1429,7 @@
             "</span></button>"
         );
         row.addEventListener("click", function () {
-          state.screen = "student";
-          state.studentId = item.student.id;
-          render();
+          navigate("student/" + g.id + "/" + item.student.id);
         });
         table.appendChild(row);
       });
@@ -1456,9 +1606,8 @@
           }
         );
         persist();
-        state.screen = "groups";
         toast("Группа удалена");
-        render();
+        navigate("groups", true);
       });
       root.appendChild(danger);
     }
@@ -1695,8 +1844,8 @@
     var g = groupById(state.groupId);
     var s = g && studentById(g, state.studentId);
     if (!s || !store.canAccessGroup(me, g.id)) {
-      state.screen = "group";
-      render();
+      if (g) navigate("group/" + g.id, true);
+      else navigate("groups", true);
       return;
     }
     var nav = el(
@@ -1705,8 +1854,7 @@
         "</button></p>"
     );
     nav.querySelector("button").addEventListener("click", function () {
-      state.screen = "group";
-      render();
+      navigate("group/" + g.id);
     });
     root.appendChild(nav);
 
@@ -1774,9 +1922,8 @@
         }
       );
       persist();
-      state.screen = "group";
       toast("Студент удалён");
-      render();
+      navigate("group/" + g.id, true);
     });
     tools.appendChild(renameBtn);
     tools.appendChild(delBtn);
@@ -1936,12 +2083,25 @@
     bridge.send("VKWebAppInit");
   }
 
+  var brandHome = document.getElementById("brand-home");
+  if (brandHome) {
+    brandHome.addEventListener("click", function () {
+      refreshMe();
+      navigate(me ? (store.isAdmin(me) ? "overview" : "groups") : "login");
+    });
+  }
+
   store.refreshClientMeta().finally(function () {
     store.ensureAdmin(data).then(function () {
       store.save(data);
       refreshMe();
-      state.screen = me ? (store.isAdmin(me) ? "admin" : "groups") : "login";
       initVk();
+      if (!location.hash || location.hash === "#" || location.hash === "#/") {
+        history.replaceState(null, "", "#/" + defaultScreen());
+      }
+      window.addEventListener("hashchange", function () {
+        render();
+      });
       render();
     });
   });
