@@ -279,8 +279,58 @@ textarea {
   border-top: 0;
 }
 
-.admin-item .toolbar {
-  margin-top: 8px;
+.admin-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.tab-on {
+  border-color: var(--accent) !important;
+  background: rgba(217, 145, 163, 0.18) !important;
+  color: var(--text-bright) !important;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.stat-card {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.stat-card strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 1.15rem;
+  color: var(--text-bright);
+}
+
+.log-row {
+  padding: 10px 0;
+  border-top: 1px solid rgba(216, 178, 188, 0.14);
+}
+
+.log-row:first-of-type {
+  border-top: 0;
+}
+
+.stack-input {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-input);
+  background: var(--bg-subtle);
+  color: var(--text);
+  font: inherit;
 }
 
 .chips {

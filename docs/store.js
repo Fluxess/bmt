@@ -31,7 +31,7 @@
   }
 
   function empty() {
-    return { version: 2, groups: [], users: [], requests: [] };
+    return { version: 2, groups: [], users: [], requests: [], logs: [] };
   }
 
   function normalize(data) {
@@ -39,6 +39,7 @@
     if (!Array.isArray(data.groups)) data.groups = [];
     if (!Array.isArray(data.users)) data.users = [];
     if (!Array.isArray(data.requests)) data.requests = [];
+    if (!Array.isArray(data.logs)) data.logs = [];
     data.version = 2;
     data.groups.forEach(function (g) {
       if (!g.id) g.id = uid();
@@ -358,6 +359,107 @@
     return (user.groupIds || []).indexOf(groupId) >= 0;
   }
 
+  function addLog(data, actor, action, details) {
+    if (!Array.isArray(data.logs)) data.logs = [];
+    data.logs.unshift({
+      id: uid(),
+      at: new Date().toISOString(),
+      actorId: actor && actor.id ? actor.id : "",
+      actorLogin: actor && actor.login ? actor.login : "system",
+      actorName: actor && actor.name ? actor.name : "Система",
+      action: String(action || "event"),
+      details: String(details || "").slice(0, 240),
+    });
+    if (data.logs.length > 500) data.logs.length = 500;
+  }
+
+  function logsCsv(data) {
+    var lines = ["Дата;Кто;Логин;Действие;Детали"];
+    (data.logs || []).forEach(function (log) {
+      lines.push(
+        [
+          log.at || "",
+          '"' + String(log.actorName || "").replace(/"/g, '""') + '"',
+          log.actorLogin || "",
+          '"' + String(log.action || "").replace(/"/g, '""') + '"',
+          '"' + String(log.details || "").replace(/"/g, '""') + '"',
+        ].join(";")
+      );
+    });
+    return "\uFEFF" + lines.join("\n");
+  }
+
+  function clearLogs(data, keep) {
+    keep = Number(keep) || 0;
+    if (!Array.isArray(data.logs)) data.logs = [];
+    data.logs = keep > 0 ? data.logs.slice(0, keep) : [];
+  }
+
+  function resetUserPassword(data, userId, newPassword) {
+    var user = data.users.find(function (u) {
+      return u.id === userId;
+    });
+    if (!user) return Promise.resolve({ ok: false, error: "Пользователь не найден" });
+    if (user.login === "dragov") {
+      return Promise.resolve({ ok: false, error: "Пароль главного админа так не сбрасывается" });
+    }
+    var password = String(newPassword || "");
+    if (password.length < 6) {
+      return Promise.resolve({ ok: false, error: "Пароль минимум 6 символов" });
+    }
+    var salt = makeSalt();
+    return hashPassword(password, salt).then(function (hash) {
+      user.salt = salt;
+      user.passwordHash = hash;
+      return { ok: true, user: user };
+    });
+  }
+
+  function adminStats(data) {
+    var students = 0;
+    var events = 0;
+    var photos = 0;
+    data.groups.forEach(function (g) {
+      students += (g.students || []).length;
+      events += (g.events || []).length;
+      photos += (g.photos || []).length + (g.cover ? 1 : 0);
+    });
+    var pending = data.requests.filter(function (r) {
+      return r.status === "pending";
+    }).length;
+    var activeUsers = data.users.filter(function (u) {
+      return u.status === "active";
+    }).length;
+    var byRole = {};
+    ROLE_ORDER.forEach(function (r) {
+      byRole[r] = 0;
+    });
+    data.users.forEach(function (u) {
+      byRole[u.role] = (byRole[u.role] || 0) + 1;
+    });
+    return {
+      groups: data.groups.length,
+      students: students,
+      events: events,
+      photos: photos,
+      users: data.users.length,
+      activeUsers: activeUsers,
+      pending: pending,
+      logs: (data.logs || []).length,
+      byRole: byRole,
+    };
+  }
+
+  function findCuratorForGroup(data, groupId) {
+    return data.users.filter(function (u) {
+      return (
+        u.status === "active" &&
+        u.role === "curator" &&
+        (u.groupIds || []).indexOf(groupId) >= 0
+      );
+    });
+  }
+
   function roleLabel(role) {
     return ROLES[role] || role;
   }
@@ -429,6 +531,7 @@
           };
         }),
         requests: data.requests,
+        logs: data.logs || [],
       },
       null,
       2
@@ -514,6 +617,12 @@
     submitRegistration: submitRegistration,
     approveRequest: approveRequest,
     rejectRequest: rejectRequest,
+    addLog: addLog,
+    logsCsv: logsCsv,
+    clearLogs: clearLogs,
+    resetUserPassword: resetUserPassword,
+    adminStats: adminStats,
+    findCuratorForGroup: findCuratorForGroup,
     canSeeAllGroups: canSeeAllGroups,
     isAdmin: isAdmin,
     visibleGroups: visibleGroups,

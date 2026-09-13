@@ -7,6 +7,9 @@
     studentId: null,
     search: "",
     catFilter: "Все",
+    adminTab: "overview",
+    userSearch: "",
+    logSearch: "",
   };
   var data = store.load();
   if (!data.groups.length) {
@@ -26,6 +29,10 @@
   function refreshMe() {
     me = store.currentUser(data);
     return me;
+  }
+
+  function logAction(action, details) {
+    store.addLog(data, me, action, details);
   }
 
   function toast(message, isError) {
@@ -170,6 +177,8 @@
     }
     var outBtn = el('<button class="btn btn-ghost" type="button">Выйти</button>');
     outBtn.addEventListener("click", function () {
+      logAction("Выход", "Выход из кабинета");
+      persist();
       store.logout();
       me = null;
       state.screen = "login";
@@ -231,6 +240,8 @@
           return;
         }
         me = res.user;
+        store.addLog(data, me, "Вход", "Успешный вход в кабинет");
+        persist();
         state.screen = store.isAdmin(me) ? "admin" : "groups";
         toast("Добро пожаловать, " + me.name);
         render();
@@ -297,6 +308,13 @@
             return;
           }
           if (!persist()) return;
+          store.addLog(
+            data,
+            { login: String(fd.get("login") || ""), name: String(fd.get("name") || "") },
+            "Заявка на регистрацию",
+            "Ожидает решения админа"
+          );
+          persist();
           toast("Заявка отправлена. Ждите решения админа.");
           state.screen = "login";
           render();
@@ -306,15 +324,114 @@
   }
 
   function renderAdmin() {
+    var stats = store.adminStats(data);
     var pending = data.requests.filter(function (r) {
       return r.status === "pending";
     });
-    var card = el(
+    var tabs = [
+      ["overview", "Обзор"],
+      ["requests", "Заявки (" + pending.length + ")"],
+      ["users", "Кабинеты"],
+      ["groups", "Группы"],
+      ["logs", "Логи (" + stats.logs + ")"],
+      ["create", "Создать"],
+    ];
+
+    var head = el(
       '<section class="card"><h1>Админ-кабинет</h1>' +
-        '<p class="status">Создание кабинетов, заявки на регистрацию, прикрепление групп.</p></section>'
+        '<p class="status">Управление кабинетами, заявками и журналом действий.</p>' +
+        '<div class="admin-tabs"></div></section>'
     );
+    var tabBar = head.querySelector(".admin-tabs");
+    tabs.forEach(function (t) {
+      var btn = el(
+        '<button class="btn btn-soft' +
+          (state.adminTab === t[0] ? " tab-on" : "") +
+          '" type="button">' +
+          t[1] +
+          "</button>"
+      );
+      btn.addEventListener("click", function () {
+        state.adminTab = t[0];
+        render();
+      });
+      tabBar.appendChild(btn);
+    });
+    root.appendChild(head);
+
+    if (state.adminTab === "overview") renderAdminOverview(stats);
+    else if (state.adminTab === "requests") renderAdminRequests(pending);
+    else if (state.adminTab === "users") renderAdminUsers();
+    else if (state.adminTab === "groups") renderAdminGroups();
+    else if (state.adminTab === "logs") renderAdminLogs();
+    else renderAdminCreate();
+  }
+
+  function renderAdminOverview(stats) {
+    var card = el('<section class="card"><h2>Сводка</h2><div class="stat-grid"></div></section>');
+    var grid = card.querySelector(".stat-grid");
+    [
+      ["Кабинеты", stats.users + " / акт. " + stats.activeUsers],
+      ["Заявки", String(stats.pending)],
+      ["Группы", String(stats.groups)],
+      ["Студенты", String(stats.students)],
+      ["Операции баллов", String(stats.events)],
+      ["Фото", String(stats.photos)],
+      ["Записи логов", String(stats.logs)],
+    ].forEach(function (item) {
+      grid.appendChild(
+        el(
+          '<div class="stat-card"><small>' +
+            escapeHtml(item[0]) +
+            "</small><strong>" +
+            escapeHtml(item[1]) +
+            "</strong></div>"
+        )
+      );
+    });
     root.appendChild(card);
 
+    var roles = el('<section class="card"><h2>По должностям</h2><div class="chips"></div></section>');
+    var chips = roles.querySelector(".chips");
+    store.ROLE_ORDER.forEach(function (r) {
+      chips.appendChild(
+        el(
+          '<span class="chip">' +
+            escapeHtml(store.roleLabel(r)) +
+            ": " +
+            (stats.byRole[r] || 0) +
+            "</span>"
+        )
+      );
+    });
+    root.appendChild(roles);
+
+    var recent = el('<section class="card"><h2>Последние действия</h2></section>');
+    var logs = (data.logs || []).slice(0, 8);
+    if (!logs.length) {
+      recent.appendChild(el('<p class="status">Пока нет записей в журнале.</p>'));
+    } else {
+      logs.forEach(function (log) {
+        recent.appendChild(
+          el(
+            '<div class="log-row"><strong>' +
+              escapeHtml(log.action) +
+              "</strong><small>" +
+              escapeHtml(log.actorName) +
+              " · @" +
+              escapeHtml(log.actorLogin) +
+              " · " +
+              formatDate(log.at) +
+              (log.details ? " · " + escapeHtml(log.details) : "") +
+              "</small></div>"
+          )
+        );
+      });
+    }
+    root.appendChild(recent);
+  }
+
+  function renderAdminRequests(pending) {
     var reqCard = el(
       '<section class="card"><h2>Заявки на регистрацию (' +
         pending.length +
@@ -379,12 +496,17 @@
             toast(res.error, true);
             return;
           }
+          logAction(
+            "Заявка принята",
+            "@" + req.login + " → " + store.roleLabel(role)
+          );
           if (!persist()) return;
           toast("Кабинет создан");
           render();
         });
         no.addEventListener("click", function () {
           store.rejectRequest(data, req.id);
+          logAction("Заявка отклонена", "@" + req.login);
           if (!persist()) return;
           toast("Заявка отклонена");
           render();
@@ -396,6 +518,31 @@
     }
     root.appendChild(reqCard);
 
+    var history = data.requests.filter(function (r) {
+      return r.status !== "pending";
+    }).slice(0, 20);
+    if (history.length) {
+      var histCard = el('<section class="card"><h2>Недавние решения</h2></section>');
+      history.forEach(function (req) {
+        histCard.appendChild(
+          el(
+            '<div class="log-row"><strong>' +
+              escapeHtml(req.name) +
+              " · " +
+              (req.status === "approved" ? "принята" : "отклонена") +
+              "</strong><small>@" +
+              escapeHtml(req.login) +
+              " · " +
+              formatDate(req.resolvedAt || req.createdAt) +
+              "</small></div>"
+          )
+        );
+      });
+      root.appendChild(histCard);
+    }
+  }
+
+  function renderAdminCreate() {
     var createCard = el(
       '<section class="card"><h2>Создать кабинет</h2>' +
         '<form class="stack">' +
@@ -438,110 +585,285 @@
             toast(res.error, true);
             return;
           }
+          logAction(
+            "Кабинет создан",
+            "@" + res.user.login + " · " + store.roleLabel(res.user.role)
+          );
           if (!persist()) return;
           toast("Кабинет @" + res.user.login + " создан");
+          state.adminTab = "users";
           render();
         });
     });
     root.appendChild(createCard);
+  }
 
+  function renderAdminUsers() {
     var usersCard = el(
       '<section class="card"><h2>Все кабинеты (' +
         data.users.length +
-        ")</h2></section>"
+        ")</h2>" +
+        '<input class="stack-input" name="userSearch" maxlength="80" placeholder="Поиск по ФИО или логину" /></section>'
     );
-    data.users
+    var searchInput = usersCard.querySelector('[name="userSearch"]');
+    searchInput.value = state.userSearch;
+    searchInput.addEventListener("input", function () {
+      state.userSearch = searchInput.value;
+      render();
+      var again = root.querySelector('[name="userSearch"]');
+      if (again) {
+        again.focus();
+        var len = again.value.length;
+        again.setSelectionRange(len, len);
+      }
+    });
+    var q = state.userSearch.trim().toLowerCase();
+    var list = data.users
       .slice()
       .sort(function (a, b) {
         return a.name.localeCompare(b.name, "ru");
       })
-      .forEach(function (u) {
-        var groups = (u.groupIds || [])
-          .map(function (id) {
-            var g = groupById(id);
-            return g ? g.name : "?";
-          })
-          .join(", ");
-        var row = el(
-          '<div class="admin-item">' +
-            "<strong>" +
-            escapeHtml(u.name) +
-            "</strong>" +
-            "<small>@" +
-            escapeHtml(u.login) +
-            " · " +
-            escapeHtml(store.roleLabel(u.role)) +
-            " · " +
-            (u.status === "active" ? "активен" : "отключён") +
-            (groups ? " · группы: " + escapeHtml(groups) : " · без группы") +
-            "</small>" +
-            '<div class="toolbar"></div></div>'
+      .filter(function (u) {
+        if (!q) return true;
+        return (
+          u.name.toLowerCase().indexOf(q) >= 0 ||
+          u.login.toLowerCase().indexOf(q) >= 0 ||
+          store.roleLabel(u.role).toLowerCase().indexOf(q) >= 0
         );
-        var tools = row.querySelector(".toolbar");
-        if (u.login !== "dragov") {
-          var attach = el('<button class="btn btn-soft" type="button">Группа</button>');
-          attach.addEventListener("click", function () {
-            var names = data.groups
-              .map(function (x) {
-                return x.name;
-              })
-              .join(", ");
-            var pick = prompt("Прикрепить группу (" + names + "). Пусто = снять.", groups);
-            if (pick === null) return;
-            pick = pick.trim();
-            if (!pick) {
-              u.groupIds = [];
-            } else {
-              var found = data.groups.find(function (x) {
-                return x.name.toLowerCase() === pick.toLowerCase();
-              });
-              if (!found) {
-                toast("Группа не найдена", true);
-                return;
-              }
-              u.groupIds = [found.id];
-            }
-            if (!persist()) return;
-            toast("Группа обновлена");
-            render();
-          });
-          var roleBtn = el('<button class="btn btn-soft" type="button">Должность</button>');
-          roleBtn.addEventListener("click", function () {
-            var next = prompt(
-              "Должность: curator / head / deputy / director / administrator",
-              u.role
-            );
-            if (next === null) return;
-            next = next.trim();
-            if (!store.ROLES[next] || next === "admin") {
-              toast("Некорректная должность. Для полных прав выберите administrator", true);
+      });
+    if (!list.length) {
+      usersCard.appendChild(el('<p class="status">Никого не найдено.</p>'));
+    }
+    list.forEach(function (u) {
+      var groups = (u.groupIds || [])
+        .map(function (id) {
+          var g = groupById(id);
+          return g ? g.name : "?";
+        })
+        .join(", ");
+      var row = el(
+        '<div class="admin-item">' +
+          "<strong>" +
+          escapeHtml(u.name) +
+          "</strong>" +
+          "<small>@" +
+          escapeHtml(u.login) +
+          " · " +
+          escapeHtml(store.roleLabel(u.role)) +
+          " · " +
+          (u.status === "active" ? "активен" : "отключён") +
+          (groups ? " · группы: " + escapeHtml(groups) : " · без группы") +
+          "</small>" +
+          '<div class="toolbar"></div></div>'
+      );
+      var tools = row.querySelector(".toolbar");
+      if (u.login !== "dragov") {
+        var attach = el('<button class="btn btn-soft" type="button">Группа</button>');
+        attach.addEventListener("click", function () {
+          var names = data.groups
+            .map(function (x) {
+              return x.name;
+            })
+            .join(", ");
+          var pick = prompt("Прикрепить группу (" + names + "). Пусто = снять.", groups);
+          if (pick === null) return;
+          pick = pick.trim();
+          if (!pick) {
+            u.groupIds = [];
+            logAction("Группа снята", "@" + u.login);
+          } else {
+            var found = data.groups.find(function (x) {
+              return x.name.toLowerCase() === pick.toLowerCase();
+            });
+            if (!found) {
+              toast("Группа не найдена", true);
               return;
             }
-            u.role = next;
-            if (!persist()) return;
-            toast("Должность обновлена");
-            render();
-          });
-          var toggle = el(
-            '<button class="btn btn-ghost" type="button">' +
-              (u.status === "active" ? "Отключить" : "Включить") +
-              "</button>"
+            u.groupIds = [found.id];
+            logAction("Группа прикреплена", "@" + u.login + " → " + found.name);
+          }
+          if (!persist()) return;
+          toast("Группа обновлена");
+          render();
+        });
+        var roleBtn = el('<button class="btn btn-soft" type="button">Должность</button>');
+        roleBtn.addEventListener("click", function () {
+          var next = prompt(
+            "Должность: curator / head / deputy / director / administrator",
+            u.role
           );
-          toggle.addEventListener("click", function () {
-            u.status = u.status === "active" ? "disabled" : "active";
+          if (next === null) return;
+          next = next.trim();
+          if (!store.ROLES[next] || next === "admin") {
+            toast("Некорректная должность. Для полных прав выберите administrator", true);
+            return;
+          }
+          var prev = u.role;
+          u.role = next;
+          logAction(
+            "Должность изменена",
+            "@" + u.login + ": " + store.roleLabel(prev) + " → " + store.roleLabel(next)
+          );
+          if (!persist()) return;
+          toast("Должность обновлена");
+          render();
+        });
+        var passBtn = el('<button class="btn btn-soft" type="button">Пароль</button>');
+        passBtn.addEventListener("click", function () {
+          var next = prompt("Новый пароль для @" + u.login + " (мин. 6 символов)");
+          if (next === null) return;
+          store.resetUserPassword(data, u.id, next).then(function (res) {
+            if (!res.ok) {
+              toast(res.error, true);
+              return;
+            }
+            logAction("Сброс пароля", "@" + u.login);
             if (!persist()) return;
-            toast("Статус обновлён");
+            toast("Пароль обновлён");
             render();
           });
-          tools.appendChild(attach);
-          tools.appendChild(roleBtn);
-          tools.appendChild(toggle);
-        } else {
-          tools.appendChild(el('<span class="status">Главный админ</span>'));
-        }
-        usersCard.appendChild(row);
-      });
+        });
+        var toggle = el(
+          '<button class="btn btn-ghost" type="button">' +
+            (u.status === "active" ? "Отключить" : "Включить") +
+            "</button>"
+        );
+        toggle.addEventListener("click", function () {
+          u.status = u.status === "active" ? "disabled" : "active";
+          logAction(
+            u.status === "active" ? "Кабинет включён" : "Кабинет отключён",
+            "@" + u.login
+          );
+          if (!persist()) return;
+          toast("Статус обновлён");
+          render();
+        });
+        tools.appendChild(attach);
+        tools.appendChild(roleBtn);
+        tools.appendChild(passBtn);
+        tools.appendChild(toggle);
+      } else {
+        tools.appendChild(el('<span class="status">Главный админ</span>'));
+      }
+      usersCard.appendChild(row);
+    });
     root.appendChild(usersCard);
+  }
+
+  function renderAdminGroups() {
+    var card = el(
+      '<section class="card"><h2>Группы и кураторы</h2>' +
+        '<p class="status">Кто за какой группой закреплён.</p></section>'
+    );
+    data.groups
+      .slice()
+      .sort(function (a, b) {
+        return a.name.localeCompare(b.name, "ru");
+      })
+      .forEach(function (g) {
+        var curators = store.findCuratorForGroup(data, g.id);
+        var names = curators
+          .map(function (u) {
+            return u.name + " (@" + u.login + ")";
+          })
+          .join(", ");
+        card.appendChild(
+          el(
+            '<div class="admin-item"><strong>' +
+              escapeHtml(g.name) +
+              "</strong><small>" +
+              g.students.length +
+              " студ. · " +
+              store.groupTotal(g) +
+              " баллов · куратор: " +
+              escapeHtml(names || "не назначен") +
+              "</small></div>"
+          )
+        );
+      });
+    if (!data.groups.length) {
+      card.appendChild(el('<p class="status">Групп пока нет.</p>'));
+    }
+    root.appendChild(card);
+  }
+
+  function renderAdminLogs() {
+    var card = el(
+      '<section class="card"><h2>Журнал действий</h2>' +
+        '<p class="status">Видят администраторы. Хранится до 500 последних записей.</p>' +
+        '<div class="toolbar"></div>' +
+        '<input class="stack-input" name="logSearch" maxlength="80" placeholder="Поиск по логам" /></section>'
+    );
+    var tools = card.querySelector(".toolbar");
+    var exportBtn = el('<button class="btn btn-soft" type="button">Экспорт CSV</button>');
+    exportBtn.addEventListener("click", function () {
+      store.downloadText(
+        "bmt-logs-" + new Date().toISOString().slice(0, 10) + ".csv",
+        store.logsCsv(data),
+        "text/csv;charset=utf-8"
+      );
+      logAction("Экспорт логов", "CSV скачан");
+      persist();
+      toast("Логи экспортированы");
+    });
+    var clearBtn = el('<button class="btn btn-ghost" type="button">Очистить логи</button>');
+    clearBtn.addEventListener("click", function () {
+      if (!confirm("Удалить все записи журнала?")) return;
+      store.clearLogs(data, 0);
+      logAction("Очистка логов", "Журнал очищен");
+      if (!persist()) return;
+      toast("Логи очищены");
+      render();
+    });
+    tools.appendChild(exportBtn);
+    tools.appendChild(clearBtn);
+
+    var searchInput = card.querySelector('[name="logSearch"]');
+    searchInput.value = state.logSearch;
+    searchInput.addEventListener("input", function () {
+      state.logSearch = searchInput.value;
+      render();
+      var again = root.querySelector('[name="logSearch"]');
+      if (again) {
+        again.focus();
+        var len = again.value.length;
+        again.setSelectionRange(len, len);
+      }
+    });
+    root.appendChild(card);
+
+    var q = state.logSearch.trim().toLowerCase();
+    var list = (data.logs || []).filter(function (log) {
+      if (!q) return true;
+      return (
+        String(log.action).toLowerCase().indexOf(q) >= 0 ||
+        String(log.details).toLowerCase().indexOf(q) >= 0 ||
+        String(log.actorName).toLowerCase().indexOf(q) >= 0 ||
+        String(log.actorLogin).toLowerCase().indexOf(q) >= 0
+      );
+    });
+    var listCard = el('<section class="card"></section>');
+    if (!list.length) {
+      listCard.appendChild(el('<p class="status">Записей нет.</p>'));
+    } else {
+      list.slice(0, 100).forEach(function (log) {
+        listCard.appendChild(
+          el(
+            '<div class="log-row"><strong>' +
+              escapeHtml(log.action) +
+              "</strong><small>" +
+              escapeHtml(log.actorName) +
+              " · @" +
+              escapeHtml(log.actorLogin) +
+              " · " +
+              formatDate(log.at) +
+              (log.details ? " · " + escapeHtml(log.details) : "") +
+              "</small></div>"
+          )
+        );
+      });
+    }
+    root.appendChild(listCard);
   }
 
   function renderGroups() {
@@ -581,6 +903,8 @@
           "application/json;charset=utf-8"
         );
         toast("Бэкап скачан");
+        logAction("Бэкап скачан", "JSON экспорт");
+        persist();
       });
       var importLabel = el(
         '<label class="btn btn-soft file-btn">Восстановить<input type="file" accept="application/json,.json" hidden /></label>'
