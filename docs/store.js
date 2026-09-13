@@ -359,18 +359,86 @@
     return (user.groupIds || []).indexOf(groupId) >= 0;
   }
 
+  var clientMetaCache = {
+    ip: "",
+    ipCheckedAt: "",
+    ready: false,
+  };
+
   function detectClient() {
+    var q = {};
     try {
-      var q = new URLSearchParams(window.location.search || "");
-      var platform = q.get("vk_platform") || "";
-      var ua = (navigator.userAgent || "").slice(0, 80);
-      return {
-        platform: platform || (ua.indexOf("Mobile") >= 0 ? "mobile-web" : "web"),
-        path: (window.location.pathname || "").slice(0, 80),
-      };
+      new URLSearchParams(window.location.search || "").forEach(function (value, key) {
+        q[key] = value;
+      });
     } catch (e) {
-      return { platform: "web", path: "" };
+      q = {};
     }
+    var ua = navigator.userAgent || "";
+    var platform =
+      q.vk_platform ||
+      (navigator.userAgentData && navigator.userAgentData.platform) ||
+      navigator.platform ||
+      "";
+    if (!platform) {
+      platform = /Mobile|Android|iPhone/i.test(ua) ? "mobile-web" : "web";
+    }
+    var conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    var screenW = window.screen ? window.screen.width : "";
+    var screenH = window.screen ? window.screen.height : "";
+    var tz = "";
+    try {
+      tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+    } catch (e2) {
+      tz = "";
+    }
+    return {
+      ip: clientMetaCache.ip || "",
+      platform: String(platform).slice(0, 40),
+      path: String(window.location.pathname || "").slice(0, 80),
+      href: String(window.location.href || "").slice(0, 160),
+      referrer: String(document.referrer || "").slice(0, 120),
+      language: String(navigator.language || "").slice(0, 20),
+      languages: Array.isArray(navigator.languages)
+        ? navigator.languages.slice(0, 4).join(",")
+        : "",
+      timezone: tz,
+      timezoneOffset: new Date().getTimezoneOffset(),
+      userAgent: ua.slice(0, 160),
+      screen: screenW && screenH ? screenW + "x" + screenH : "",
+      viewport:
+        (window.innerWidth || "") + "x" + (window.innerHeight || ""),
+      online: navigator.onLine ? "online" : "offline",
+      connection: conn && conn.effectiveType ? String(conn.effectiveType) : "",
+      downlink: conn && conn.downlink !== undefined ? String(conn.downlink) : "",
+      deviceMemory: navigator.deviceMemory ? String(navigator.deviceMemory) : "",
+      hardwareConcurrency: navigator.hardwareConcurrency
+        ? String(navigator.hardwareConcurrency)
+        : "",
+      vkUserId: q.vk_user_id ? String(q.vk_user_id) : "",
+      vkAppId: q.vk_app_id ? String(q.vk_app_id) : "",
+      vkPlatform: q.vk_platform ? String(q.vk_platform) : "",
+      vkViewer: q.vk_viewer_group_id ? String(q.vk_viewer_group_id) : "",
+      colorDepth: window.screen ? String(window.screen.colorDepth || "") : "",
+      touch: navigator.maxTouchPoints ? String(navigator.maxTouchPoints) : "0",
+    };
+  }
+
+  function refreshClientMeta() {
+    return fetch("https://api.ipify.org?format=json")
+      .then(function (r) {
+        return r.json();
+      })
+      .then(function (json) {
+        clientMetaCache.ip = json && json.ip ? String(json.ip) : "";
+        clientMetaCache.ipCheckedAt = new Date().toISOString();
+        clientMetaCache.ready = true;
+        return clientMetaCache;
+      })
+      .catch(function () {
+        clientMetaCache.ready = true;
+        return clientMetaCache;
+      });
   }
 
   function addLog(data, actor, action, details, meta) {
@@ -391,15 +459,35 @@
       target: meta.target ? String(meta.target).slice(0, 120) : "",
       amount: meta.amount !== undefined && meta.amount !== null ? Number(meta.amount) : "",
       category: meta.category ? String(meta.category).slice(0, 40) : "",
+      ip: client.ip,
       platform: client.platform,
       path: client.path,
+      href: client.href,
+      referrer: client.referrer,
+      language: client.language,
+      languages: client.languages,
+      timezone: client.timezone,
+      timezoneOffset: client.timezoneOffset,
+      userAgent: client.userAgent,
+      screen: client.screen,
+      viewport: client.viewport,
+      online: client.online,
+      connection: client.connection,
+      downlink: client.downlink,
+      deviceMemory: client.deviceMemory,
+      hardwareConcurrency: client.hardwareConcurrency,
+      vkUserId: client.vkUserId,
+      vkAppId: client.vkAppId,
+      vkPlatform: client.vkPlatform,
+      colorDepth: client.colorDepth,
+      touch: client.touch,
     });
     if (data.logs.length > 800) data.logs.length = 800;
   }
 
   function logsCsv(data) {
     var lines = [
-      "Дата;Кто;Логин;Роль;Действие;Детали;Группа;Цель;Сумма;Категория;Платформа",
+      "Дата;Кто;Логин;Роль;Действие;Детали;Группа;Цель;Сумма;Категория;IP;Платформа;Язык;ЧасовойПояс;Экран;Viewport;Сеть;UA;VK_user;Referrer;Online",
     ];
     (data.logs || []).forEach(function (log) {
       lines.push(
@@ -414,7 +502,17 @@
           '"' + String(log.target || "").replace(/"/g, '""') + '"',
           log.amount === "" || log.amount === undefined ? "" : log.amount,
           '"' + String(log.category || "").replace(/"/g, '""') + '"',
+          log.ip || "",
           log.platform || "",
+          log.language || "",
+          log.timezone || "",
+          log.screen || "",
+          log.viewport || "",
+          log.connection || "",
+          '"' + String(log.userAgent || "").replace(/"/g, '""') + '"',
+          log.vkUserId || "",
+          '"' + String(log.referrer || "").replace(/"/g, '""') + '"',
+          log.online || "",
         ].join(";")
       );
     });
@@ -652,6 +750,8 @@
     addLog: addLog,
     logsCsv: logsCsv,
     clearLogs: clearLogs,
+    refreshClientMeta: refreshClientMeta,
+    detectClient: detectClient,
     resetUserPassword: resetUserPassword,
     adminStats: adminStats,
     findCuratorForGroup: findCuratorForGroup,

@@ -844,7 +844,7 @@
   function renderAdminLogs() {
     var card = el(
       '<section class="card"><h2>Журнал действий</h2>' +
-        '<p class="status">Видят администраторы. Хранится до 800 последних записей: кто, роль, действие, группа, цель, сумма, категория, платформа.</p>' +
+        '<p class="status">Видят администраторы. До 800 записей. Пишутся IP (публичный), платформа, UA, экран, язык, часовой пояс, сеть, VK-параметры и детали действия.</p>' +
         '<div class="toolbar"></div>' +
         '<input class="stack-input" name="logSearch" maxlength="80" placeholder="Поиск по логам" /></section>'
     );
@@ -902,6 +902,7 @@
     } else {
       list.slice(0, 150).forEach(function (log) {
         var extra = [];
+        if (log.ip) extra.push("IP " + log.ip);
         if (log.groupName) extra.push("группа " + log.groupName);
         if (log.target) extra.push("цель: " + log.target);
         if (log.amount !== "" && log.amount !== undefined && log.amount !== null) {
@@ -910,6 +911,12 @@
         if (log.category) extra.push(log.category);
         if (log.actorRole) extra.push(store.roleLabel(log.actorRole) || log.actorRole);
         if (log.platform) extra.push(log.platform);
+        if (log.screen) extra.push(log.screen);
+        if (log.language) extra.push(log.language);
+        if (log.timezone) extra.push(log.timezone);
+        if (log.connection) extra.push(log.connection);
+        if (log.vkUserId) extra.push("vk:" + log.vkUserId);
+        if (log.online) extra.push(log.online);
         listCard.appendChild(
           el(
             '<div class="log-row"><strong>' +
@@ -1929,11 +1936,13 @@
     bridge.send("VKWebAppInit");
   }
 
-  store.ensureAdmin(data).then(function () {
-    store.save(data);
-    refreshMe();
-    state.screen = me ? (store.isAdmin(me) ? "admin" : "groups") : "login";
-    initVk();
-    render();
+  store.refreshClientMeta().finally(function () {
+    store.ensureAdmin(data).then(function () {
+      store.save(data);
+      refreshMe();
+      state.screen = me ? (store.isAdmin(me) ? "admin" : "groups") : "login";
+      initVk();
+      render();
+    });
   });
 })();
