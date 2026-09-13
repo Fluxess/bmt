@@ -359,30 +359,62 @@
     return (user.groupIds || []).indexOf(groupId) >= 0;
   }
 
-  function addLog(data, actor, action, details) {
+  function detectClient() {
+    try {
+      var q = new URLSearchParams(window.location.search || "");
+      var platform = q.get("vk_platform") || "";
+      var ua = (navigator.userAgent || "").slice(0, 80);
+      return {
+        platform: platform || (ua.indexOf("Mobile") >= 0 ? "mobile-web" : "web"),
+        path: (window.location.pathname || "").slice(0, 80),
+      };
+    } catch (e) {
+      return { platform: "web", path: "" };
+    }
+  }
+
+  function addLog(data, actor, action, details, meta) {
     if (!Array.isArray(data.logs)) data.logs = [];
+    meta = meta || {};
+    var client = detectClient();
     data.logs.unshift({
       id: uid(),
       at: new Date().toISOString(),
       actorId: actor && actor.id ? actor.id : "",
       actorLogin: actor && actor.login ? actor.login : "system",
       actorName: actor && actor.name ? actor.name : "Система",
+      actorRole: actor && actor.role ? actor.role : "",
       action: String(action || "event"),
-      details: String(details || "").slice(0, 240),
+      details: String(details || "").slice(0, 400),
+      groupId: meta.groupId ? String(meta.groupId) : "",
+      groupName: meta.groupName ? String(meta.groupName).slice(0, 40) : "",
+      target: meta.target ? String(meta.target).slice(0, 120) : "",
+      amount: meta.amount !== undefined && meta.amount !== null ? Number(meta.amount) : "",
+      category: meta.category ? String(meta.category).slice(0, 40) : "",
+      platform: client.platform,
+      path: client.path,
     });
-    if (data.logs.length > 500) data.logs.length = 500;
+    if (data.logs.length > 800) data.logs.length = 800;
   }
 
   function logsCsv(data) {
-    var lines = ["Дата;Кто;Логин;Действие;Детали"];
+    var lines = [
+      "Дата;Кто;Логин;Роль;Действие;Детали;Группа;Цель;Сумма;Категория;Платформа",
+    ];
     (data.logs || []).forEach(function (log) {
       lines.push(
         [
           log.at || "",
           '"' + String(log.actorName || "").replace(/"/g, '""') + '"',
           log.actorLogin || "",
+          log.actorRole || "",
           '"' + String(log.action || "").replace(/"/g, '""') + '"',
           '"' + String(log.details || "").replace(/"/g, '""') + '"',
+          '"' + String(log.groupName || "").replace(/"/g, '""') + '"',
+          '"' + String(log.target || "").replace(/"/g, '""') + '"',
+          log.amount === "" || log.amount === undefined ? "" : log.amount,
+          '"' + String(log.category || "").replace(/"/g, '""') + '"',
+          log.platform || "",
         ].join(";")
       );
     });

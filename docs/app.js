@@ -31,8 +31,8 @@
     return me;
   }
 
-  function logAction(action, details) {
-    store.addLog(data, me, action, details);
+  function logAction(action, details, meta) {
+    store.addLog(data, me, action, details, meta || {});
   }
 
   function toast(message, isError) {
@@ -177,7 +177,9 @@
     }
     var outBtn = el('<button class="btn btn-ghost" type="button">Выйти</button>');
     outBtn.addEventListener("click", function () {
-      logAction("Выход", "Выход из кабинета");
+      logAction("Выход", "Выход из кабинета · роль " + store.roleLabel(me.role), {
+        target: "@" + me.login,
+      });
       persist();
       store.logout();
       me = null;
@@ -236,11 +238,20 @@
       var fd = new FormData(e.target);
       store.login(data, fd.get("login"), fd.get("password")).then(function (res) {
         if (!res.ok) {
+          store.addLog(
+            data,
+            { login: String(fd.get("login") || ""), name: "Неизвестный" },
+            "Ошибка входа",
+            "Неверный логин или пароль"
+          );
+          persist();
           toast(res.error, true);
           return;
         }
         me = res.user;
-        store.addLog(data, me, "Вход", "Успешный вход в кабинет");
+        store.addLog(data, me, "Вход", "Успешный вход · роль " + store.roleLabel(me.role), {
+          target: "@" + me.login,
+        });
         persist();
         state.screen = store.isAdmin(me) ? "admin" : "groups";
         toast("Добро пожаловать, " + me.name);
@@ -312,7 +323,19 @@
             data,
             { login: String(fd.get("login") || ""), name: String(fd.get("name") || "") },
             "Заявка на регистрацию",
-            "Ожидает решения админа"
+            "Роль: " +
+              store.roleLabel(String(fd.get("role") || "curator")) +
+              (fd.get("groupId")
+                ? " · группа " +
+                  ((groupById(String(fd.get("groupId"))) || {}).name || "?")
+                : "") +
+              (fd.get("comment") ? " · " + String(fd.get("comment")) : ""),
+            {
+              target: "@" + String(fd.get("login") || ""),
+              category: String(fd.get("role") || ""),
+              groupId: String(fd.get("groupId") || ""),
+              groupName: ((groupById(String(fd.get("groupId"))) || {}).name || ""),
+            }
           );
           persist();
           toast("Заявка отправлена. Ждите решения админа.");
@@ -498,7 +521,21 @@
           }
           logAction(
             "Заявка принята",
-            "@" + req.login + " → " + store.roleLabel(role)
+            "@" +
+              req.login +
+              " · " +
+              req.name +
+              " → " +
+              store.roleLabel(role) +
+              (groupId
+                ? " · группа " + ((groupById(groupId) || {}).name || "?")
+                : ""),
+            {
+              target: "@" + req.login,
+              category: role,
+              groupId: groupId || "",
+              groupName: ((groupById(groupId) || {}).name || ""),
+            }
           );
           if (!persist()) return;
           toast("Кабинет создан");
@@ -506,7 +543,10 @@
         });
         no.addEventListener("click", function () {
           store.rejectRequest(data, req.id);
-          logAction("Заявка отклонена", "@" + req.login);
+          logAction("Заявка отклонена", "@" + req.login + " · " + req.name, {
+            target: "@" + req.login,
+            category: req.role || "",
+          });
           if (!persist()) return;
           toast("Заявка отклонена");
           render();
@@ -587,7 +627,21 @@
           }
           logAction(
             "Кабинет создан",
-            "@" + res.user.login + " · " + store.roleLabel(res.user.role)
+            "@" +
+              res.user.login +
+              " · " +
+              res.user.name +
+              " · " +
+              store.roleLabel(res.user.role) +
+              (groupId
+                ? " · группа " + ((groupById(groupId) || {}).name || "?")
+                : ""),
+            {
+              target: "@" + res.user.login,
+              category: res.user.role,
+              groupId: groupId || "",
+              groupName: ((groupById(groupId) || {}).name || ""),
+            }
           );
           if (!persist()) return;
           toast("Кабинет @" + res.user.login + " создан");
@@ -790,7 +844,7 @@
   function renderAdminLogs() {
     var card = el(
       '<section class="card"><h2>Журнал действий</h2>' +
-        '<p class="status">Видят администраторы. Хранится до 500 последних записей.</p>' +
+        '<p class="status">Видят администраторы. Хранится до 800 последних записей: кто, роль, действие, группа, цель, сумма, категория, платформа.</p>' +
         '<div class="toolbar"></div>' +
         '<input class="stack-input" name="logSearch" maxlength="80" placeholder="Поиск по логам" /></section>'
     );
@@ -846,7 +900,16 @@
     if (!list.length) {
       listCard.appendChild(el('<p class="status">Записей нет.</p>'));
     } else {
-      list.slice(0, 100).forEach(function (log) {
+      list.slice(0, 150).forEach(function (log) {
+        var extra = [];
+        if (log.groupName) extra.push("группа " + log.groupName);
+        if (log.target) extra.push("цель: " + log.target);
+        if (log.amount !== "" && log.amount !== undefined && log.amount !== null) {
+          extra.push("сумма " + log.amount);
+        }
+        if (log.category) extra.push(log.category);
+        if (log.actorRole) extra.push(store.roleLabel(log.actorRole) || log.actorRole);
+        if (log.platform) extra.push(log.platform);
         listCard.appendChild(
           el(
             '<div class="log-row"><strong>' +
@@ -858,6 +921,7 @@
               " · " +
               formatDate(log.at) +
               (log.details ? " · " + escapeHtml(log.details) : "") +
+              (extra.length ? " · " + escapeHtml(extra.join(" · ")) : "") +
               "</small></div>"
           )
         );
@@ -886,9 +950,15 @@
         var added = store.ensurePresetGroups(data);
         if (!added) {
           toast("Все группы из расписания уже есть");
+          logAction("Импорт групп bumate.ru", "Новых групп нет, всё уже загружено");
+          persist();
           return;
         }
         if (!persist()) return;
+        logAction("Импорт групп bumate.ru", "Добавлено групп: " + added, {
+          amount: added,
+        });
+        persist();
         toast("Добавлено групп: " + added);
         render();
       });
@@ -919,6 +989,17 @@
             if (!confirm("Заменить текущие данные бэкапом? Это необратимо.")) return;
             data = imported;
             store.ensureAdmin(data).then(function () {
+              logAction(
+                "Восстановление бэкапа",
+                "Импорт JSON · групп: " +
+                  data.groups.length +
+                  " · кабинетов: " +
+                  data.users.length,
+                {
+                  amount: data.groups.length,
+                  target: "backup-import",
+                }
+              );
               if (!persist()) return;
               refreshMe();
               state.screen = "groups";
@@ -999,6 +1080,11 @@
           cover: "",
         });
         if (!persist()) return;
+        logAction("Группа создана", "«" + name + "»", {
+          groupName: name,
+          target: name,
+        });
+        persist();
         toast("Группа «" + name + "» создана");
         render();
       });
@@ -1061,8 +1147,15 @@
       if (next === null) return;
       next = next.trim();
       if (!next) return;
+      var oldName = g.name;
       g.name = next.slice(0, 40);
       if (!persist()) return;
+      logAction(
+        "Группа переименована",
+        "«" + oldName + "» → «" + g.name + "»",
+        { groupId: g.id, groupName: g.name, target: oldName }
+      );
+      persist();
       toast("Группа переименована");
       render();
     });
@@ -1073,6 +1166,12 @@
         store.rankingCsv(g),
         "text/csv;charset=utf-8"
       );
+      logAction("Экспорт рейтинга CSV", "Группа " + g.name, {
+        groupId: g.id,
+        groupName: g.name,
+        amount: g.students.length,
+      });
+      persist();
       toast("Рейтинг экспортирован");
     });
     var shareBtn = el('<button class="btn btn-soft" type="button">Поделиться</button>');
@@ -1096,6 +1195,11 @@
       clearCover.addEventListener("click", function () {
         g.cover = "";
         if (!persist()) return;
+        logAction("Обложка группы убрана", "Группа " + g.name, {
+          groupId: g.id,
+          groupName: g.name,
+        });
+        persist();
         toast("Фото группы убрано");
         render();
       });
@@ -1214,6 +1318,17 @@
         return;
       }
       if (!persist()) return;
+      logAction(
+        "Студенты добавлены",
+        "Группа " + g.name + " · +" + added + " · " + names.slice(0, 3).join(", ") + (names.length > 3 ? "…" : ""),
+        {
+          groupId: g.id,
+          groupName: g.name,
+          amount: added,
+          target: names.slice(0, 5).join(", "),
+        }
+      );
+      persist();
       toast("Добавлено: " + added);
       render();
     });
@@ -1280,6 +1395,28 @@
           at: new Date().toISOString(),
         });
         if (!persist()) return;
+        var st = studentById(g, picked.id);
+        logAction(
+          delta > 0 ? "Начисление баллов" : "Списание баллов",
+          "Группа " +
+            g.name +
+            " · " +
+            (st ? st.name : "?") +
+            " · " +
+            formatPts(delta) +
+            " · " +
+            String(fd.get("category") || "Прочее") +
+            " · " +
+            (String(fd.get("reason") || "").trim() || "Без комментария"),
+          {
+            groupId: g.id,
+            groupName: g.name,
+            target: st ? st.name : picked.id,
+            amount: delta,
+            category: String(fd.get("category") || "Прочее"),
+          }
+        );
+        persist();
         toast("Баллы сохранены: " + formatPts(delta));
         render();
       });
@@ -1302,6 +1439,16 @@
           });
         });
         if (!persist()) return;
+        logAction(
+          "Группа удалена",
+          "«" + g.name + "» · студ. " + g.students.length + " · событий " + g.events.length,
+          {
+            groupId: g.id,
+            groupName: g.name,
+            amount: g.students.length,
+          }
+        );
+        persist();
         state.screen = "groups";
         toast("Группа удалена");
         render();
@@ -1337,6 +1484,12 @@
           });
         }
         if (!persist()) return;
+        logAction("Обложка группы установлена", "Группа " + g.name, {
+          groupId: g.id,
+          groupName: g.name,
+          target: "cover",
+        });
+        persist();
         toast("Фото группы установлено");
         render();
       });
@@ -1376,6 +1529,27 @@
           return x.id !== ev.id;
         });
         if (!persist()) return;
+        logAction(
+          "Отмена операции баллов",
+          "Группа " +
+            g.name +
+            " · " +
+            store.studentName(g, ev.studentId) +
+            " · " +
+            formatPts(ev.delta) +
+            " · " +
+            ev.category +
+            " · " +
+            ev.reason,
+          {
+            groupId: g.id,
+            groupName: g.name,
+            target: store.studentName(g, ev.studentId),
+            amount: ev.delta,
+            category: ev.category,
+          }
+        );
+        persist();
         toast("Операция отменена");
         render();
       });
@@ -1415,6 +1589,17 @@
           if (next === null) return;
           item.title = next.trim().slice(0, 80) || item.kind || "Фото";
           if (!persist()) return;
+          logAction(
+            "Подпись фото изменена",
+            "Группа " + g.name + " · " + (item.kind || "Фото") + " · «" + item.title + "»",
+            {
+              groupId: g.id,
+              groupName: g.name,
+              target: item.title,
+              category: item.kind || "",
+            }
+          );
+          persist();
           toast("Подпись обновлена");
           render();
         });
@@ -1424,6 +1609,17 @@
             return x.id !== item.id;
           });
           if (!persist()) return;
+          logAction(
+            "Фото удалено",
+            "Группа " + g.name + " · " + (item.kind || "Фото") + " · «" + (item.title || "") + "»",
+            {
+              groupId: g.id,
+              groupName: g.name,
+              target: item.title || item.kind || "",
+              category: item.kind || "",
+            }
+          );
+          persist();
           toast("Фото удалено");
           render();
         });
@@ -1469,6 +1665,17 @@
           g.cover = dataUrl;
         }
         if (!persist()) return;
+        logAction(
+          "Фото добавлено в альбом",
+          "Группа " + g.name + " · " + kind + " · «" + title + "»",
+          {
+            groupId: g.id,
+            groupName: g.name,
+            target: title,
+            category: kind,
+          }
+        );
+        persist();
         toast("Фото добавлено");
         render();
       });
@@ -1521,14 +1728,27 @@
       if (next === null) return;
       next = next.trim();
       if (!next) return;
+      var oldName = s.name;
       s.name = next.slice(0, 80);
       if (!persist()) return;
+      logAction(
+        "Студент переименован",
+        "Группа " + g.name + " · «" + oldName + "» → «" + s.name + "»",
+        {
+          groupId: g.id,
+          groupName: g.name,
+          target: s.name,
+        }
+      );
+      persist();
       toast("ФИО обновлено");
       render();
     });
     var delBtn = el('<button class="btn btn-ghost" type="button">Удалить студента</button>');
     delBtn.addEventListener("click", function () {
       if (!confirm("Удалить «" + s.name + "» и все его баллы?")) return;
+      var removedName = s.name;
+      var removedPts = store.studentTotal(g, s.id);
       g.students = g.students.filter(function (x) {
         return x.id !== s.id;
       });
@@ -1536,6 +1756,17 @@
         return x.studentId !== s.id;
       });
       if (!persist()) return;
+      logAction(
+        "Студент удалён",
+        "Группа " + g.name + " · «" + removedName + "» · баллов было " + removedPts,
+        {
+          groupId: g.id,
+          groupName: g.name,
+          target: removedName,
+          amount: removedPts,
+        }
+      );
+      persist();
       state.screen = "group";
       toast("Студент удалён");
       render();
@@ -1571,6 +1802,28 @@
         at: new Date().toISOString(),
       });
       if (!persist()) return;
+      logAction(
+        delta > 0 ? "Начисление баллов" : "Списание баллов",
+        "Группа " +
+          g.name +
+          " · " +
+          s.name +
+          " · " +
+          formatPts(delta) +
+          " · " +
+          String(fd.get("category") || "Прочее") +
+          " · " +
+          (String(fd.get("reason") || "").trim() || "Без комментария") +
+          " · быстрая форма",
+        {
+          groupId: g.id,
+          groupName: g.name,
+          target: s.name,
+          amount: delta,
+          category: String(fd.get("category") || "Прочее"),
+        }
+      );
+      persist();
       toast("Баллы: " + formatPts(delta));
       render();
     });
@@ -1603,6 +1856,28 @@
             return x.id !== ev.id;
           });
           if (!persist()) return;
+          logAction(
+            "Отмена операции баллов",
+            "Группа " +
+              g.name +
+              " · " +
+              s.name +
+              " · " +
+              formatPts(ev.delta) +
+              " · " +
+              ev.category +
+              " · " +
+              ev.reason +
+              " · из карточки студента",
+            {
+              groupId: g.id,
+              groupName: g.name,
+              target: s.name,
+              amount: ev.delta,
+              category: ev.category,
+            }
+          );
+          persist();
           toast("Операция отменена");
           render();
         });
@@ -1619,6 +1894,8 @@
       bridge
         .send("VKWebAppShare", { link: link })
         .then(function () {
+          logAction("Поделиться", "Ссылка отправлена через VK", { target: link });
+          persist();
           toast("Ссылка отправлена");
         })
         .catch(function () {
@@ -1633,6 +1910,8 @@
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(link).then(
         function () {
+          logAction("Поделиться", "Ссылка скопирована", { target: link });
+          persist();
           toast("Ссылка скопирована");
         },
         function () {
