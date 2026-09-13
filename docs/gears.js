@@ -24,13 +24,17 @@
   var COLOR_TEXT = "rgba(237, 212, 218, 0.45)";
 
   function resize() {
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var isNarrow = window.innerWidth < 700;
+    dpr = Math.min(window.devicePixelRatio || 1, isNarrow ? 1.25 : 2);
     width = window.innerWidth;
     height = window.innerHeight;
     canvas.width = Math.round(width * dpr);
     canvas.height = Math.round(height * dpr);
     canvas.style.width = width + "px";
     canvas.style.height = height + "px";
+    if (typeof pickParts === "function") {
+      parts = pickParts();
+    }
   }
   window.addEventListener("resize", resize);
   resize();
@@ -451,9 +455,7 @@
   }
 
   // Список динамических машиностроительных деталей
-  // Размещаем две главные полосы чертежей (вверху и внизу, как на референсном изображении)
-  // плюс несколько свободно плывущих сборок в фоне
-  var parts = [
+  var allParts = [
     // Верхняя полоса (движение слева направо)
     { type: "gear", relY: 0.11, x: 80, vx: 0.32, r: 62, teeth: 18, angle: 0, vAngle: 0.0035, label: "Ø124" },
     { type: "cutter", relY: 0.08, x: 250, vx: 0.32, r: 52, teeth: 14, angle: 0.4, vAngle: -0.005, label: "Ø104" },
@@ -479,10 +481,40 @@
     { type: "flange", relY: 0.52, x: 1750, vx: -0.15, r: 130, angle: 0, vAngle: -0.0014, label: "Ø260", faint: true }
   ];
 
+  function pickParts() {
+    var w = window.innerWidth || 1024;
+    if (w < 480) {
+      return allParts.filter(function (p, i) {
+        return !p.faint && i % 3 === 0;
+      });
+    }
+    if (w < 800) {
+      return allParts.filter(function (p, i) {
+        return !p.faint && i % 2 === 0;
+      });
+    }
+    return allParts.slice();
+  }
+
+  var parts = pickParts();
+  var reducedMotion =
+    window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var scrollOffset = 0;
+  var running = true;
 
   function render() {
+    if (!running) return;
     requestAnimationFrame(render);
+
+    if (reducedMotion) {
+      ctx.save();
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, width, height);
+      drawGrid(ctx, width, height, 0, 0);
+      ctx.restore();
+      running = false;
+      return;
+    }
 
     // Плавное следование за курсором
     pointerX += (targetPX - pointerX) * 0.04;
