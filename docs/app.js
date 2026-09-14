@@ -1405,12 +1405,27 @@
       usersCard.appendChild(el('<p class="status">Никого не найдено.</p>'));
     }
     list.forEach(function (u) {
-      var groups = (u.groupIds || [])
+      var groupNames = (u.groupIds || [])
         .map(function (id) {
           var g = groupById(id);
-          return g ? g.name : "?";
+          return g ? g.name : "";
         })
-        .join(", ");
+        .filter(Boolean);
+      // подтянуть имена, если id устарели после облака
+      if (!groupNames.length && Array.isArray(u.groupNames) && u.groupNames.length) {
+        u.groupNames.forEach(function (name) {
+          var found = data.groups.find(function (g) {
+            return String(g.name).toLowerCase() === String(name).toLowerCase();
+          });
+          if (found) {
+            groupNames.push(found.name);
+            if ((u.groupIds || []).indexOf(found.id) < 0) {
+              u.groupIds = (u.groupIds || []).concat([found.id]);
+            }
+          }
+        });
+      }
+      var groupsLabel = groupNames.join(", ");
       var row = el(
         '<div class="admin-item">' +
           "<strong>" +
@@ -1422,7 +1437,12 @@
           escapeHtml(store.roleLabel(u.role)) +
           " · " +
           (u.status === "active" ? "активен" : "отключён") +
-          (groups ? " · группы: " + escapeHtml(groups) : " · без группы") +
+          (groupsLabel
+            ? " · группы: " + escapeHtml(groupsLabel)
+            : " · без группы") +
+          (u.role === "curator" && !groupsLabel
+            ? " · нужно назначить группу"
+            : "") +
           "</small>" +
           '<div class="toolbar"></div></div>'
       );
@@ -1435,7 +1455,10 @@
               return x.name;
             })
             .join(", ");
-          var pick = prompt("Прикрепить группу (" + names + "). Пусто = снять.", groups);
+          var pick = prompt(
+            "Прикрепить группу (" + names + "). Пусто = снять.",
+            groupsLabel
+          );
           if (pick === null) return;
           pick = pick.trim();
           if (!pick) {

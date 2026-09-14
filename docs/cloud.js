@@ -219,11 +219,32 @@
   }
 
   function mergePhotos(a, b) {
-    return mergeByKey(a || [], b || [], function (p) {
+    var local = a || [];
+    var remote = b || [];
+    var map = {};
+    var order = [];
+    function keyOf(p) {
       return String(p.id || "") || "p:" + String(p.title || "") + ":" + String(p.at || "");
-    }).map(function (p) {
-      // prefer side that still has image bytes
-      return p;
+    }
+    function put(p) {
+      if (!p) return;
+      var k = keyOf(p);
+      if (!map[k]) {
+        map[k] = p;
+        order.push(k);
+        return;
+      }
+      var cur = map[k];
+      var curLen = cur.image ? String(cur.image).length : 0;
+      var nextLen = p.image ? String(p.image).length : 0;
+      // всегда предпочитаем сторону, где реально есть картинка
+      if (nextLen > curLen) map[k] = Object.assign({}, cur, p);
+      else map[k] = Object.assign({}, p, cur);
+    }
+    local.forEach(put);
+    remote.forEach(put);
+    return order.map(function (k) {
+      return map[k];
     });
   }
 
