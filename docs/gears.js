@@ -15,13 +15,51 @@
   var targetPY = 0;
 
   var COLOR_GRID_SUBTLE = "rgba(216, 178, 188, 0.035)";
-  COLOR_GRID_MAJOR = "rgba(216, 178, 188, 0.07)";
+  var COLOR_GRID_MAJOR = "rgba(216, 178, 188, 0.07)";
   var COLOR_LINE = "rgba(237, 212, 218, 0.28)";
   var COLOR_LINE_BOLD = "rgba(237, 212, 218, 0.42)";
   var COLOR_LINE_FAINT = "rgba(216, 178, 188, 0.16)";
   var COLOR_ACCENT = "rgba(217, 145, 163, 0.45)";
   var COLOR_HATCH = "rgba(216, 178, 188, 0.12)";
   var COLOR_TEXT = "rgba(237, 212, 218, 0.45)";
+
+  var allParts = [
+    { type: "gear", relY: 0.11, x: 80, vx: 0.32, r: 62, teeth: 18, angle: 0, vAngle: 0.0035, label: "Ø124" },
+    { type: "cutter", relY: 0.08, x: 250, vx: 0.32, r: 52, teeth: 14, angle: 0.4, vAngle: -0.005, label: "Ø104" },
+    { type: "shaft", relY: 0.14, x: 440, vx: 0.32, w: 150, h: 54, angle: -0.04, vAngle: 0 },
+    { type: "flange", relY: 0.10, x: 670, vx: 0.32, r: 58, angle: 0.2, vAngle: 0.0025, label: "6 отв. Ø8" },
+    { type: "gear", relY: 0.13, x: 860, vx: 0.32, r: 44, teeth: 13, angle: 1.1, vAngle: -0.006, label: "Ø88" },
+    { type: "cutter", relY: 0.09, x: 1040, vx: 0.32, r: 68, teeth: 20, angle: 0.7, vAngle: 0.003, label: "Ø136" },
+    { type: "shaft", relY: 0.12, x: 1260, vx: 0.32, w: 170, h: 60, angle: 0.02, vAngle: 0 },
+    { type: "flange", relY: 0.11, x: 1510, vx: 0.32, r: 50, angle: 0.9, vAngle: -0.0035, label: "Ø100" },
+    { type: "gear", relY: 0.89, x: 100, vx: -0.28, r: 70, teeth: 22, angle: 0.2, vAngle: -0.0028, label: "m=2.5 z=22" },
+    { type: "shaft", relY: 0.87, x: 310, vx: -0.28, w: 160, h: 58, angle: 0.05, vAngle: 0 },
+    { type: "cutter", relY: 0.91, x: 530, vx: -0.28, r: 56, teeth: 16, angle: 0.8, vAngle: 0.004, label: "R=56" },
+    { type: "flange", relY: 0.88, x: 730, vx: -0.28, r: 64, angle: 1.4, vAngle: -0.003, label: "Ø128" },
+    { type: "gear", relY: 0.92, x: 940, vx: -0.28, r: 48, teeth: 15, angle: 0.5, vAngle: 0.005, label: "Ø96" },
+    { type: "shaft", relY: 0.89, x: 1150, vx: -0.28, w: 140, h: 50, angle: -0.03, vAngle: 0 },
+    { type: "cutter", relY: 0.86, x: 1370, vx: -0.28, r: 62, teeth: 18, angle: 1.2, vAngle: -0.0038, label: "Ø124" },
+    { type: "flange", relY: 0.91, x: 1580, vx: -0.28, r: 54, angle: 0.1, vAngle: 0.004, label: "4 отв. M8" },
+    { type: "gear", relY: 0.48, x: -60, vx: 0.12, r: 120, teeth: 32, angle: 0, vAngle: 0.0012, label: "Ø240", faint: true },
+    { type: "flange", relY: 0.52, x: 1750, vx: -0.15, r: 130, angle: 0, vAngle: -0.0014, label: "Ø260", faint: true },
+  ];
+
+  function pickParts() {
+    var w = window.innerWidth || 1024;
+    if (w < 480) {
+      return allParts.filter(function (p, i) {
+        return !p.faint && i % 3 === 0;
+      });
+    }
+    if (w < 800) {
+      return allParts.filter(function (p, i) {
+        return !p.faint && i % 2 === 0;
+      });
+    }
+    return allParts.slice();
+  }
+
+  var parts = pickParts();
 
   function resize() {
     var isNarrow = window.innerWidth < 700;
@@ -32,14 +70,13 @@
     canvas.height = Math.round(height * dpr);
     canvas.style.width = width + "px";
     canvas.style.height = height + "px";
-    if (typeof pickParts === "function") {
-      parts = pickParts();
-    }
+    parts = pickParts();
   }
   window.addEventListener("resize", resize);
   resize();
 
   window.addEventListener("pointermove", function (e) {
+    if (!width || !height) return;
     targetPX = (e.clientX / width - 0.5) * 2;
     targetPY = (e.clientY / height - 0.5) * 2;
   });
@@ -454,49 +491,8 @@
     ctx.restore();
   }
 
-  // Список динамических машиностроительных деталей
-  var allParts = [
-    // Верхняя полоса (движение слева направо)
-    { type: "gear", relY: 0.11, x: 80, vx: 0.32, r: 62, teeth: 18, angle: 0, vAngle: 0.0035, label: "Ø124" },
-    { type: "cutter", relY: 0.08, x: 250, vx: 0.32, r: 52, teeth: 14, angle: 0.4, vAngle: -0.005, label: "Ø104" },
-    { type: "shaft", relY: 0.14, x: 440, vx: 0.32, w: 150, h: 54, angle: -0.04, vAngle: 0 },
-    { type: "flange", relY: 0.10, x: 670, vx: 0.32, r: 58, angle: 0.2, vAngle: 0.0025, label: "6 отв. Ø8" },
-    { type: "gear", relY: 0.13, x: 860, vx: 0.32, r: 44, teeth: 13, angle: 1.1, vAngle: -0.006, label: "Ø88" },
-    { type: "cutter", relY: 0.09, x: 1040, vx: 0.32, r: 68, teeth: 20, angle: 0.7, vAngle: 0.003, label: "Ø136" },
-    { type: "shaft", relY: 0.12, x: 1260, vx: 0.32, w: 170, h: 60, angle: 0.02, vAngle: 0 },
-    { type: "flange", relY: 0.11, x: 1510, vx: 0.32, r: 50, angle: 0.9, vAngle: -0.0035, label: "Ø100" },
+  // Список динамических машиностроительных деталей задан выше (allParts / pickParts)
 
-    // Нижняя полоса (движение справа налево)
-    { type: "gear", relY: 0.89, x: 100, vx: -0.28, r: 70, teeth: 22, angle: 0.2, vAngle: -0.0028, label: "m=2.5 z=22" },
-    { type: "shaft", relY: 0.87, x: 310, vx: -0.28, w: 160, h: 58, angle: 0.05, vAngle: 0 },
-    { type: "cutter", relY: 0.91, x: 530, vx: -0.28, r: 56, teeth: 16, angle: 0.8, vAngle: 0.004, label: "R=56" },
-    { type: "flange", relY: 0.88, x: 730, vx: -0.28, r: 64, angle: 1.4, vAngle: -0.003, label: "Ø128" },
-    { type: "gear", relY: 0.92, x: 940, vx: -0.28, r: 48, teeth: 15, angle: 0.5, vAngle: 0.005, label: "Ø96" },
-    { type: "shaft", relY: 0.89, x: 1150, vx: -0.28, w: 140, h: 50, angle: -0.03, vAngle: 0 },
-    { type: "cutter", relY: 0.86, x: 1370, vx: -0.28, r: 62, teeth: 18, angle: 1.2, vAngle: -0.0038, label: "Ø124" },
-    { type: "flange", relY: 0.91, x: 1580, vx: -0.28, r: 54, angle: 0.1, vAngle: 0.004, label: "4 отв. M8" },
-
-    // Фоновые крупные детали по бокам (мягкий дрейф)
-    { type: "gear", relY: 0.48, x: -60, vx: 0.12, r: 120, teeth: 32, angle: 0, vAngle: 0.0012, label: "Ø240", faint: true },
-    { type: "flange", relY: 0.52, x: 1750, vx: -0.15, r: 130, angle: 0, vAngle: -0.0014, label: "Ø260", faint: true }
-  ];
-
-  function pickParts() {
-    var w = window.innerWidth || 1024;
-    if (w < 480) {
-      return allParts.filter(function (p, i) {
-        return !p.faint && i % 3 === 0;
-      });
-    }
-    if (w < 800) {
-      return allParts.filter(function (p, i) {
-        return !p.faint && i % 2 === 0;
-      });
-    }
-    return allParts.slice();
-  }
-
-  var parts = pickParts();
   var reducedMotion =
     window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var scrollOffset = 0;
