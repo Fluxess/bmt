@@ -577,26 +577,43 @@
 
   function renderRegister() {
     if (state.lastRequestLink) {
+      var st = state.lastRequestLink.cloudStatus || "";
+      var cloudMsg =
+        st === "sending"
+          ? "Отправляем заявку админу…"
+          : st === "ok" || st === "already"
+            ? "Готово: заявка уже у админа в разделе «Заявки». Ждите решения — ссылку слать не нужно."
+            : st === "fail"
+              ? "Автоотправка не удалась. Нажмите «Отправить…» и выберите чат с админом."
+              : "Если админ не видит заявку — отправьте ссылку ниже.";
       var done = el(
         '<section class="card">' +
-          "<h1>Остался один шаг</h1>" +
+          "<h1>" +
+          (st === "ok" || st === "already" ? "Заявка отправлена" : "Заявка создана") +
+          "</h1>" +
           '<p class="status">Логин: <strong>@' +
           escapeHtml(state.lastRequestLink.login) +
-          "</strong>. Нажмите <strong>Отправить…</strong> и выберите чат с админом (Telegram / VK). Он откроет ссылку — заявка появится у него в «Заявки».</p>" +
-          '<div class="share-host"></div>' +
+          "</strong></p>" +
+          '<p class="status">' +
+          escapeHtml(cloudMsg) +
+          "</p>" +
+          (st === "ok" || st === "already"
+            ? ""
+            : '<div class="share-host"></div>') +
           '<div class="toolbar"></div></section>'
       );
-      mountSharePanel(done.querySelector(".share-host"), {
-        url: state.lastRequestLink.url,
-        title: "Заявка BMT",
-        hint: "",
-        shareText:
-          "Заявка на кабинет BMT @" +
-          state.lastRequestLink.login +
-          ". Откройте ссылку под админом:",
-        autoShare: !!state.lastRequestLink.autoShare,
-      });
-      state.lastRequestLink.autoShare = false;
+      if (st !== "ok" && st !== "already") {
+        mountSharePanel(done.querySelector(".share-host"), {
+          url: state.lastRequestLink.url,
+          title: "Заявка BMT",
+          shareText:
+            "Заявка на кабинет BMT @" +
+            state.lastRequestLink.login +
+            ". Откройте ссылку под админом:",
+          autoShare: !!state.lastRequestLink.autoShare,
+        });
+        state.lastRequestLink.autoShare = false;
+      }
       var again = el('<button class="btn btn-soft" type="button">Новая заявка</button>');
       again.addEventListener("click", function () {
         state.lastRequestLink = null;
@@ -616,7 +633,7 @@
     var card = el(
       '<section class="card">' +
         "<h1>Заявка на личный кабинет</h1>" +
-        '<p class="status">Заполните форму — дальше одним нажатием отправите заявку админу в Telegram или VK.</p>' +
+        '<p class="status">После создания заявка сама появится у админа. Ссылки слать не нужно.</p>' +
         '<form class="stack">' +
         '<label class="lbl">ФИО</label>' +
         '<input name="name" required maxlength="80" placeholder="Иванова А. С." />' +
@@ -630,7 +647,7 @@
         '<select name="groupId"></select>' +
         '<label class="lbl">Комментарий</label>' +
         '<textarea name="comment" rows="3" maxlength="200" placeholder="Например: куратор группы 616"></textarea>' +
-        '<button class="btn" type="submit">Создать и отправить админу</button></form>' +
+        '<button class="btn" type="submit">Отправить заявку</button></form>' +
         '<p class="status"><button class="link" type="button" id="go-login">Уже есть кабинет — войти</button></p>' +
         "</section>"
     );
@@ -673,14 +690,37 @@
             return;
           }
           if (!persist()) return;
+          var payload = store.buildRequestPayload(res.request);
           var url = requestShareUrl(res.request);
           state.lastRequestLink = {
             login: res.request.login,
             url: url,
-            autoShare: true,
+            autoShare: false,
+            cloudStatus: "sending",
           };
-          toast("Отправьте заявку админу одним нажатием");
           render();
+          var cloud = window.BmtCloud;
+          if (cloud && cloud.pushRequest) {
+            cloud.pushRequest(payload).then(function (cRes) {
+              state.lastRequestLink.cloudStatus = cRes.ok
+                ? cRes.already
+                  ? "already"
+                  : "ok"
+                : "fail";
+              state.lastRequestLink.cloudError = cRes.error || "";
+              if (cRes.ok) {
+                toast("Заявка ушла админу в облако");
+              } else {
+                state.lastRequestLink.autoShare = true;
+                toast("Облако недоступно — отправьте ссылку вручную", true);
+              }
+              render();
+            });
+          } else {
+            state.lastRequestLink.cloudStatus = "fail";
+            state.lastRequestLink.autoShare = true;
+            render();
+          }
         })
         .catch(function () {
           toast("Не удалось создать заявку", true);
@@ -766,16 +806,60 @@
     root.appendChild(recent);
   }
 
+  function syncCloudRequests() {
+    var cloud = window.BmtCloud;
+    if (!cloud || !cloud.pullPending) return Promise.resolve(0);
+    return cloud.pullPending().then(function (list) {
+      var added = 0;
+      (list || []).forEach(function (payload) {
+        if (!payload || !payload.login || !payload.passwordHash) return;
+        var token = store.encodeInvite(payload);
+        var res = store.importRequest(data, token);
+        if (res.ok && !res.already) added += 1;
+      });
+      if (added && persist()) {
+        logAction("Облако", "Подтянуто заявок: " + added);
+        persist();
+      }
+      return added;
+    });
+  }
+
   function renderAdminRequests(pending) {
     renderAdminPageHead(
       "Заявки",
-      "Примите заявку или вставьте ссылку, которую прислал преподаватель."
+      "Заявки с телефонов преподавателей подтягиваются сами. Можно также вставить ссылку."
     );
+
+    var syncCard = el(
+      '<section class="card">' +
+        "<h2>Облако заявок</h2>" +
+        '<p class="status" id="cloud-sync-status">Проверяем новые заявки…</p>' +
+        '<div class="toolbar"></div></section>'
+    );
+    var syncBtn = el('<button class="btn btn-soft" type="button">Обновить сейчас</button>');
+    function runSync(silent) {
+      var statusEl = syncCard.querySelector("#cloud-sync-status");
+      if (!silent) statusEl.textContent = "Обновляем…";
+      syncCloudRequests().then(function (added) {
+        statusEl.textContent =
+          added > 0
+            ? "Добавлено новых: " + added
+            : "Новых заявок в облаке нет (или уже загружены).";
+        if (added > 0) render();
+      });
+    }
+    syncBtn.addEventListener("click", function () {
+      runSync(false);
+    });
+    syncCard.querySelector(".toolbar").appendChild(syncBtn);
+    root.appendChild(syncCard);
+    runSync(true);
 
     var pasteCard = el(
       '<section class="card">' +
-        "<h2>Получил ссылку в Telegram / VK?</h2>" +
-        '<p class="status">Вставьте сюда ссылку из сообщения — заявка сразу появится в списке. Открывать ссылку в новой вкладке не обязательно.</p>' +
+        "<h2>Вставить ссылку вручную</h2>" +
+        '<p class="status">Запасной способ, если облако недоступно.</p>' +
         '<form class="stack paste-request">' +
         '<label class="lbl">Ссылка заявки</label>' +
         '<textarea name="paste" rows="3" placeholder="https://fluxess.github.io/bmt/#/request/…" required></textarea>' +
@@ -881,6 +965,9 @@
             }
           );
           if (!persist()) return;
+          if (window.BmtCloud && window.BmtCloud.markResolved) {
+            window.BmtCloud.markResolved(req.login, "approved");
+          }
           if (res.user) {
             state.lastInvite = {
               login: res.user.login,
@@ -899,6 +986,9 @@
             category: req.role || "",
           });
           if (!persist()) return;
+          if (window.BmtCloud && window.BmtCloud.markResolved) {
+            window.BmtCloud.markResolved(req.login, "rejected");
+          }
           toast("Заявка отклонена");
           render();
         });
