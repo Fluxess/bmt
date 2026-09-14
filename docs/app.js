@@ -1254,6 +1254,88 @@
     root.appendChild(card);
   }
 
+  function renderCriteriaPanel(host, g) {
+    var criteria = window.BmtCriteria;
+    if (!criteria || !criteria.SECTIONS) {
+      host.appendChild(
+        el('<p class="status">Не загружен файл критериев. Обновите страницу (Ctrl+F5).</p>')
+      );
+      return;
+    }
+
+    criteria.SECTIONS.forEach(function (section) {
+      var box = el(
+        '<div class="criteria-block">' +
+          "<h3>" +
+          escapeHtml(section.title) +
+          "</h3>" +
+          (section.hint
+            ? '<p class="status">' + escapeHtml(section.hint) + "</p>"
+            : "") +
+          '<div class="criteria-grid"></div></div>'
+      );
+      var grid = box.querySelector(".criteria-grid");
+      section.items.forEach(function (item) {
+        var active =
+          item.mode === "set" &&
+          (g.events || []).some(function (e) {
+            return e.criterionKey === item.key && Number(e.delta) === Number(item.delta);
+          });
+        var btn = el(
+          '<button class="criteria-btn' +
+            (active ? " is-on" : "") +
+            (Number(item.delta) < 0 ? " is-minus" : Number(item.delta) > 0 ? " is-plus" : "") +
+            '" type="button"><span class="criteria-pts">' +
+            escapeHtml(criteria.formatDelta(item.delta)) +
+            '</span><span class="criteria-label">' +
+            escapeHtml(item.label) +
+            (item.mode === "count" ? " × N" : "") +
+            "</span></button>"
+        );
+        btn.addEventListener("click", function () {
+          var count = 1;
+          if (item.mode === "count") {
+            var raw = prompt(item.countLabel || "Количество", "1");
+            if (raw === null) return;
+            count = Math.max(1, Math.floor(Number(raw) || 0));
+            if (!count) {
+              toast("Укажите число больше 0", true);
+              return;
+            }
+          }
+          var ev = criteria.applyCriterion(g, item, count);
+          if (!persist()) return;
+          logAction(
+            Number(ev.delta) >= 0 ? "Критерий положения +" : "Критерий положения −",
+            "Группа " +
+              g.name +
+              " · " +
+              ev.reason +
+              " · " +
+              formatPts(ev.delta),
+            {
+              groupId: g.id,
+              groupName: g.name,
+              target: item.label,
+              amount: ev.delta,
+              category: item.category,
+            }
+          );
+          persist();
+          toast(
+            (item.mode === "set" ? "Показатель: " : "Добавлено: ") +
+              item.label +
+              " · " +
+              formatPts(ev.delta)
+          );
+          render();
+        });
+        grid.appendChild(btn);
+      });
+      host.appendChild(box);
+    });
+  }
+
   function renderGroup() {
     var g = groupById(state.groupId);
     if (!g || !store.canAccessGroup(me, g.id)) {
@@ -1491,9 +1573,16 @@
     });
     root.appendChild(addSt);
 
-    var addPts = el('<section class="card"><h2>Начислить / списать</h2></section>');
+    var addPts = el(
+      '<section class="card"><h2>Начислить по положению</h2>' +
+        '<p class="status">СТП-ПО-ВС № 5-07 · «Лучшая учебная группа года». Нажимайте кнопки — баллы подставятся сами. Показатели с одним выбором (успеваемость, посещаемость и т.п.) заменяют предыдущее значение.</p></section>'
+    );
+    renderCriteriaPanel(addPts, g);
+    root.appendChild(addPts);
+
+    var manualPts = el('<section class="card"><h2>Вручную студенту</h2></section>');
     if (!g.students.length) {
-      addPts.appendChild(
+      manualPts.appendChild(
         el('<p class="status">Сначала добавьте студента кнопкой выше.</p>')
       );
     } else {
@@ -1506,7 +1595,7 @@
           escapeHtml(sorted[0].name) +
           "</strong></p>"
       );
-      addPts.appendChild(pickLabel);
+      manualPts.appendChild(pickLabel);
       var pickWrap = el('<div class="pick-list"></div>');
       sorted.forEach(function (s) {
         var btn = el(
@@ -1519,11 +1608,11 @@
             b.classList.remove("pick-on");
           });
           btn.classList.add("pick-on");
-          addPts.querySelector("#picked-name").textContent = s.name;
+          manualPts.querySelector("#picked-name").textContent = s.name;
         });
         pickWrap.appendChild(btn);
       });
-      addPts.appendChild(pickWrap);
+      manualPts.appendChild(pickWrap);
       var form = el(
         '<form class="stack">' +
           '<label class="lbl">Категория</label>' +
@@ -1577,9 +1666,9 @@
         toast("Баллы сохранены: " + formatPts(delta));
         render();
       });
-      addPts.appendChild(form);
+      manualPts.appendChild(form);
     }
-    root.appendChild(addPts);
+    root.appendChild(manualPts);
 
     if (store.isAdmin(me) || store.canSeeAllGroups(me)) {
       var danger = el(

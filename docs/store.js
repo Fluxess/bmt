@@ -2,7 +2,18 @@
   var KEY = "bmt-points-v1";
   var SESSION_KEY = "bmt-session-v1";
   var PHOTO_KINDS = ["Грамота", "Фото группы", "Мероприятие", "Прочее"];
-  var CATEGORIES = ["Учёба", "Дисциплина", "Мероприятия", "Прочее"];
+  var CATEGORIES = [
+    "Контингент",
+    "Успеваемость",
+    "Качество знаний",
+    "Посещаемость",
+    "Дисциплина",
+    "Внешний вид",
+    "Мероприятия",
+    "Хозработы",
+    "Учёба",
+    "Прочее",
+  ];
   var ROLES = {
     admin: "Главный админ",
     administrator: "Администратор",
@@ -674,7 +685,9 @@
 
   function rankingCsv(group) {
     var ranked = rankedStudents(group);
-    var lines = ["Место;ФИО;Баллы;Учёба;Дисциплина;Мероприятия;Прочее"];
+    var lines = [
+      "Место;ФИО;Баллы;Успеваемость;Дисциплина;Мероприятия;Учёба;Прочее",
+    ];
     ranked.forEach(function (item, i) {
       var cats = categoryTotals(group, item.student.id);
       lines.push(
@@ -682,9 +695,10 @@
           i + 1,
           '"' + String(item.student.name).replace(/"/g, '""') + '"',
           item.total,
-          cats["Учёба"],
+          cats["Успеваемость"] || 0,
           cats["Дисциплина"],
           cats["Мероприятия"],
+          cats["Учёба"] || 0,
           cats["Прочее"],
         ].join(";")
       );
