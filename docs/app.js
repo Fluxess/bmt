@@ -9,6 +9,8 @@
     catFilter: "Все",
     userSearch: "",
     logSearch: "",
+    lastInvite: null,
+    inviteToken: null,
   };
 
   var ADMIN_PAGES = {
@@ -144,6 +146,7 @@
     var titles = {
       login: "Вход",
       register: "Регистрация",
+      invite: "Приглашение",
       groups: "Группы",
       group: "Группа",
       student: "Студент",
@@ -185,6 +188,14 @@
     if (screen === "student" && parts[1] && parts[2]) {
       return { screen: "student", groupId: parts[1], studentId: parts[2] };
     }
+    if (screen === "invite" && parts[1]) {
+      return {
+        screen: "invite",
+        groupId: null,
+        studentId: null,
+        inviteToken: parts.slice(1).join("/"),
+      };
+    }
     if (screen === "admin-groups" || screen === "curators") {
       screen = "assignments";
     }
@@ -207,7 +218,7 @@
       };
       history.replaceState(null, "", "#/" + route.screen);
     }
-    if (!me && route.screen !== "login" && route.screen !== "register") {
+    if (!me && route.screen !== "login" && route.screen !== "register" && route.screen !== "invite") {
       route = { screen: "login", groupId: null, studentId: null };
       history.replaceState(null, "", "#/login");
     }
@@ -219,13 +230,16 @@
       };
       history.replaceState(null, "", "#/" + route.screen);
     }
-    if (ADMIN_PAGES[route.screen] && me && !store.isAdmin(me)) {
+    if (me && route.screen === "invite") {
+      // allow invite even when logged in — switches account
+    } else if (ADMIN_PAGES[route.screen] && me && !store.isAdmin(me)) {
       route = { screen: "groups", groupId: null, studentId: null };
       history.replaceState(null, "", "#/groups");
     }
     state.screen = route.screen;
     state.groupId = route.groupId;
     state.studentId = route.studentId;
+    state.inviteToken = route.inviteToken || null;
   }
 
   function navigate(path, replace) {
@@ -316,6 +330,10 @@
     try {
       window.scrollTo(0, 0);
     } catch (e) {}
+    if (state.screen === "invite") {
+      renderInvite();
+      return;
+    }
     if (!me) {
       if (state.screen === "register") renderRegister();
       else renderLogin();
@@ -404,14 +422,50 @@
     root.appendChild(actions);
   }
 
+  function renderInvite() {
+    var card = el(
+      '<section class="card">' +
+        "<h1>Приглашение в кабинет</h1>" +
+        '<p class="status">Ссылка добавит ваш личный кабинет на это устройство.</p>' +
+        '<div class="toolbar"></div></section>'
+    );
+    var tools = card.querySelector(".toolbar");
+    var accept = el('<button class="btn" type="button">Принять и войти</button>');
+    var cancel = el('<button class="btn btn-soft" type="button">Отмена</button>');
+    accept.addEventListener("click", function () {
+      var res = store.acceptInvite(data, state.inviteToken || "");
+      if (!res.ok) {
+        toast(res.error, true);
+        return;
+      }
+      if (!persist()) return;
+      me = res.user;
+      logAction(
+        "Приглашение принято",
+        "Кабинет @" + res.user.login + " установлен на устройстве",
+        { target: "@" + res.user.login }
+      );
+      persist();
+      toast("Кабинет @" + res.user.login + " готов");
+      navigate(store.isAdmin(me) ? "overview" : "groups", true);
+    });
+    cancel.addEventListener("click", function () {
+      navigate(me ? defaultScreen() : "login", true);
+    });
+    tools.appendChild(accept);
+    tools.appendChild(cancel);
+    root.appendChild(card);
+  }
+
   function renderLogin() {
     var card = el(
       '<section class="card">' +
         "<h1>Вход в личный кабинет</h1>" +
         '<p class="status">У каждого сотрудника — свой кабинет. Куратору прикрепляется группа.</p>' +
+        '<p class="status">Если кабинет создал админ на другом компьютере — откройте ссылку-приглашение или восстановите бэкап JSON.</p>' +
         '<form class="stack">' +
         '<label class="lbl">Логин</label>' +
-        '<input name="login" required autocomplete="username" placeholder="логин" />' +
+        '<input name="login" required autocomplete="username" placeholder="логин латиницей" />' +
         '<label class="lbl">Пароль</label>' +
         '<input name="password" type="password" required autocomplete="current-password" />' +
         '<button class="btn" type="submit">Войти</button></form>' +
@@ -443,6 +497,8 @@
         persist();
         toast("Добро пожаловать, " + me.name);
         navigate(store.isAdmin(me) ? "overview" : "groups", true);
+      }).catch(function () {
+        toast("Не удалось войти. Откройте сайт по HTTPS.", true);
       });
     });
     root.appendChild(card);
@@ -452,12 +508,12 @@
     var card = el(
       '<section class="card">' +
         "<h1>Заявка на личный кабинет</h1>" +
-        '<p class="status">Админ проверит заявку и прикрепит группу при необходимости.</p>' +
+        '<p class="status">Заявку нужно подать на том же устройстве, где работает админ — либо админ создаст кабинет и пришлёт вам ссылку-приглашение.</p>' +
         '<form class="stack">' +
         '<label class="lbl">ФИО</label>' +
         '<input name="name" required maxlength="80" placeholder="Иванова А. С." />' +
-        '<label class="lbl">Логин</label>' +
-        '<input name="login" required maxlength="40" autocomplete="username" />' +
+        '<label class="lbl">Логин (латиница)</label>' +
+        '<input name="login" required maxlength="40" autocomplete="username" placeholder="ivanova" />' +
         '<label class="lbl">Пароль</label>' +
         '<input name="password" type="password" required minlength="6" autocomplete="new-password" />' +
         '<label class="lbl">Должность</label>' +
@@ -613,7 +669,8 @@
     var reqCard = el(
       '<section class="card"><h2>Ожидают решения (' +
         pending.length +
-        ")</h2></section>"
+        ")</h2>" +
+        '<p class="status">Важно: заявка видна только на этом устройстве. После принятия отправьте преподавателю бэкап или ссылку-приглашение с экрана «Кабинеты».</p></section>'
     );
     if (!pending.length) {
       reqCard.appendChild(el('<p class="status">Новых заявок нет.</p>'));
@@ -627,45 +684,41 @@
             "</strong>" +
             "<small>@" +
             escapeHtml(req.login) +
-            " · " +
+            " · хочет: " +
             escapeHtml(store.roleLabel(req.role)) +
             (g ? " · группа " + escapeHtml(g.name) : "") +
             (req.comment ? " · " + escapeHtml(req.comment) : "") +
             " · " +
             formatDate(req.createdAt) +
             "</small>" +
-            '<div class="toolbar"></div></div>'
+            '<div class="stack tight approve-box">' +
+            '<label class="lbl">Должность</label>' +
+            '<select class="approve-role"></select>' +
+            '<label class="lbl">Группа</label>' +
+            '<select class="approve-group"></select>' +
+            '<div class="toolbar"></div></div></div>'
         );
+        var roleSel = box.querySelector(".approve-role");
+        ["curator", "head", "deputy", "director", "administrator"].forEach(function (r) {
+          roleSel.appendChild(option(r, store.roleLabel(r), r === (req.role || "curator")));
+        });
+        var gSel = box.querySelector(".approve-group");
+        gSel.appendChild(option("", "Без группы"));
+        data.groups
+          .slice()
+          .sort(function (a, b) {
+            return a.name.localeCompare(b.name, "ru");
+          })
+          .forEach(function (gr) {
+            gSel.appendChild(
+              option(gr.id, gr.name, req.groupId === gr.id)
+            );
+          });
         var ok = el('<button class="btn" type="button">Принять</button>');
         var no = el('<button class="btn btn-ghost" type="button">Отклонить</button>');
         ok.addEventListener("click", function () {
-          var role = prompt(
-            "Должность (curator/head/deputy/director/administrator)",
-            req.role || "curator"
-          );
-          if (role === null) return;
-          var groupId = req.groupId || "";
-          if (role === "curator") {
-            var names = data.groups
-              .map(function (x) {
-                return x.name;
-              })
-              .join(", ");
-            var pick = prompt(
-              "Прикрепить группу (номер из списка: " + names + ")",
-              g ? g.name : ""
-            );
-            if (pick === null) return;
-            pick = pick.trim();
-            var found = data.groups.find(function (x) {
-              return x.name.toLowerCase() === pick.toLowerCase();
-            });
-            groupId = found ? found.id : "";
-            if (!groupId && pick) {
-              toast("Группа не найдена", true);
-              return;
-            }
-          }
+          var role = roleSel.value;
+          var groupId = gSel.value;
           var res = store.approveRequest(data, req.id, {
             role: role,
             groupId: groupId,
@@ -693,7 +746,7 @@
             }
           );
           if (!persist()) return;
-          toast("Кабинет создан");
+          toast("Кабинет создан на этом устройстве");
           render();
         });
         no.addEventListener("click", function () {
@@ -737,15 +790,42 @@
     }
   }
 
+  function inviteUrlFor(user, password) {
+    var token = store.encodeInvite(store.buildInvitePayload(user, password || ""));
+    var base = location.href.split("#")[0];
+    return base + "#/invite/" + token;
+  }
+
+  function copyText(text, okMsg) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(
+        function () {
+          toast(okMsg || "Скопировано");
+        },
+        function () {
+          prompt("Скопируйте вручную", text);
+        }
+      );
+    } else {
+      prompt("Скопируйте вручную", text);
+    }
+  }
+
   function renderAdminCreate() {
     renderAdminPageHead("Создать кабинет", "Ручное создание кабинета сотрудника.");
     var createCard = el(
       '<section class="card"><h2>Новый кабинет</h2>' +
+        '<p class="status">После создания скопируйте ссылку-приглашение и отправьте преподавателю — иначе на его телефоне кабинета не будет (данные пока только в браузере).</p>' +
         '<form class="stack">' +
-        '<input name="name" required maxlength="80" placeholder="ФИО" />' +
-        '<input name="login" required maxlength="40" placeholder="Логин" />' +
-        '<input name="password" type="password" required minlength="6" placeholder="Пароль" />' +
+        '<label class="lbl">ФИО</label>' +
+        '<input name="fullName" required maxlength="80" placeholder="Иванова А. С." />' +
+        '<label class="lbl">Логин (латиница)</label>' +
+        '<input name="login" required maxlength="40" placeholder="ivanova" autocomplete="off" />' +
+        '<label class="lbl">Пароль</label>' +
+        '<input name="password" type="password" required minlength="6" placeholder="мин. 6 символов" autocomplete="new-password" />' +
+        '<label class="lbl">Должность</label>' +
         '<select name="role"></select>' +
+        '<label class="lbl">Группа (обязательно для куратора)</label>' +
         '<select name="groupId"></select>' +
         '<button class="btn" type="submit">Создать</button></form></section>'
     );
@@ -768,11 +848,12 @@
       e.preventDefault();
       var fd = new FormData(e.target);
       var groupId = String(fd.get("groupId") || "");
+      var password = String(fd.get("password") || "");
       store
         .createUser(data, {
-          name: fd.get("name"),
+          name: fd.get("fullName"),
           login: fd.get("login"),
-          password: fd.get("password"),
+          password: password,
           role: fd.get("role"),
           groupIds: groupId ? [groupId] : [],
         })
@@ -800,8 +881,17 @@
             }
           );
           if (!persist()) return;
+          var link = inviteUrlFor(res.user, password);
+          state.lastInvite = {
+            login: res.user.login,
+            password: password,
+            url: link,
+          };
           toast("Кабинет @" + res.user.login + " создан");
           navigate("users", true);
+        })
+        .catch(function () {
+          toast("Не удалось создать кабинет", true);
         });
     });
     root.appendChild(createCard);
@@ -809,6 +899,30 @@
 
   function renderAdminUsers() {
     renderAdminPageHead("Кабинеты", "Управление пользователями, ролями и доступом.");
+    if (state.lastInvite) {
+      var inviteCard = el(
+        '<section class="card">' +
+          "<h2>Ссылка для @" +
+          escapeHtml(state.lastInvite.login) +
+          "</h2>" +
+          '<p class="status">Пароль: <strong>' +
+          escapeHtml(state.lastInvite.password) +
+          "</strong>. Отправьте ссылку преподавателю — кабинет появится на его телефоне.</p>" +
+          '<div class="toolbar"></div></section>'
+      );
+      var copyBtn = el('<button class="btn" type="button">Копировать ссылку</button>');
+      copyBtn.addEventListener("click", function () {
+        copyText(state.lastInvite.url, "Ссылка скопирована");
+      });
+      var hideBtn = el('<button class="btn btn-soft" type="button">Скрыть</button>');
+      hideBtn.addEventListener("click", function () {
+        state.lastInvite = null;
+        render();
+      });
+      inviteCard.querySelector(".toolbar").appendChild(copyBtn);
+      inviteCard.querySelector(".toolbar").appendChild(hideBtn);
+      root.appendChild(inviteCard);
+    }
     var usersCard = el(
       '<section class="card"><h2>Все кабинеты (' +
         data.users.length +
@@ -929,9 +1043,18 @@
             }
             logAction("Сброс пароля", "@" + u.login);
             if (!persist()) return;
-            toast("Пароль обновлён");
+            state.lastInvite = {
+              login: u.login,
+              password: next,
+              url: inviteUrlFor(u, next),
+            };
+            toast("Пароль обновлён — скопируйте ссылку ниже");
             render();
           });
+        });
+        var invBtn = el('<button class="btn btn-soft" type="button">Ссылка</button>');
+        invBtn.addEventListener("click", function () {
+          copyText(inviteUrlFor(u), "Ссылка-приглашение скопирована");
         });
         var toggle = el(
           '<button class="btn btn-ghost" type="button">' +
@@ -951,6 +1074,7 @@
         tools.appendChild(attach);
         tools.appendChild(roleBtn);
         tools.appendChild(passBtn);
+        tools.appendChild(invBtn);
         tools.appendChild(toggle);
       } else {
         tools.appendChild(el('<span class="status">Главный админ</span>'));

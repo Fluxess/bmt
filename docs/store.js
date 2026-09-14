@@ -117,6 +117,11 @@
   }
 
   function hashPassword(password, salt) {
+    if (!global.crypto || !crypto.subtle) {
+      return Promise.reject(
+        new Error("Нужен HTTPS-браузер с поддержкой шифрования паролей")
+      );
+    }
     var enc = new TextEncoder();
     return crypto.subtle
       .digest("SHA-256", enc.encode(String(salt) + ":" + String(password)))
@@ -127,6 +132,30 @@
     var arr = new Uint8Array(16);
     crypto.getRandomValues(arr);
     return toHex(arr);
+  }
+
+  function normalizeLogin(login) {
+    return String(login || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "");
+  }
+
+  function validateLogin(loginName) {
+    if (!loginName || loginName.length < 3) {
+      return "Логин слишком короткий (мин. 3 символа)";
+    }
+    if (!/^[a-z0-9._-]{3,40}$/i.test(loginName)) {
+      return "Логин: латиница, цифры, точка, _ или -";
+    }
+    return "";
+  }
+
+  function validatePassword(password) {
+    if (!password || String(password).length < 6) {
+      return "Пароль не короче 6 символов";
+    }
+    return "";
   }
 
   function ensureAdmin(data) {
@@ -189,9 +218,9 @@
   }
 
   function findUserByLogin(data, login) {
-    var key = String(login || "").trim().toLowerCase();
+    var key = normalizeLogin(login);
     return data.users.find(function (u) {
-      return String(u.login).toLowerCase() === key;
+      return normalizeLogin(u.login) === key;
     });
   }
 
@@ -200,13 +229,20 @@
     if (!user || user.status !== "active") {
       return Promise.resolve({ ok: false, error: "Неверный логин или пароль" });
     }
-    return hashPassword(password, user.salt).then(function (hash) {
-      if (hash !== user.passwordHash) {
-        return { ok: false, error: "Неверный логин или пароль" };
-      }
-      setSession(user.id);
-      return { ok: true, user: user };
-    });
+    return hashPassword(password, user.salt)
+      .then(function (hash) {
+        if (hash !== user.passwordHash) {
+          return { ok: false, error: "Неверный логин или пароль" };
+        }
+        setSession(user.id);
+        return { ok: true, user: user };
+      })
+      .catch(function (err) {
+        return {
+          ok: false,
+          error: (err && err.message) || "Не удалось проверить пароль",
+        };
+      });
   }
 
   function logout() {
@@ -214,13 +250,18 @@
   }
 
   function createUser(data, opts) {
-    var loginName = String(opts.login || "").trim().toLowerCase();
+    var loginName = normalizeLogin(opts.login);
     var password = String(opts.password || "");
     var name = String(opts.name || "").trim();
     var role = opts.role || "curator";
+    var groupIds = Array.isArray(opts.groupIds) ? opts.groupIds.slice() : [];
     if (!loginName || !password || !name) {
       return Promise.resolve({ ok: false, error: "Заполните логин, пароль и ФИО" });
     }
+    var loginErr = validateLogin(loginName);
+    if (loginErr) return Promise.resolve({ ok: false, error: loginErr });
+    var passErr = validatePassword(password);
+    if (passErr) return Promise.resolve({ ok: false, error: passErr });
     if (!ROLES[role]) role = "curator";
     if (role === "admin") {
       return Promise.resolve({
@@ -228,29 +269,42 @@
         error: "Роль «Главный админ» зарезервирована. Выберите «Администратор».",
       });
     }
+    if (role === "curator" && !groupIds.length) {
+      return Promise.resolve({
+        ok: false,
+        error: "Куратору нужно прикрепить группу",
+      });
+    }
     if (findUserByLogin(data, loginName)) {
       return Promise.resolve({ ok: false, error: "Такой логин уже занят" });
     }
     var salt = makeSalt();
-    return hashPassword(password, salt).then(function (hash) {
-      var user = {
-        id: uid(),
-        login: loginName,
-        name: name.slice(0, 80),
-        role: role,
-        salt: salt,
-        passwordHash: hash,
-        groupIds: Array.isArray(opts.groupIds) ? opts.groupIds.slice() : [],
-        status: "active",
-        createdAt: new Date().toISOString(),
-      };
-      data.users.push(user);
-      return { ok: true, user: user };
-    });
+    return hashPassword(password, salt)
+      .then(function (hash) {
+        var user = {
+          id: uid(),
+          login: loginName,
+          name: name.slice(0, 80),
+          role: role,
+          salt: salt,
+          passwordHash: hash,
+          groupIds: groupIds,
+          status: "active",
+          createdAt: new Date().toISOString(),
+        };
+        data.users.push(user);
+        return { ok: true, user: user, password: password };
+      })
+      .catch(function (err) {
+        return {
+          ok: false,
+          error: (err && err.message) || "Не удалось создать кабинет",
+        };
+      });
   }
 
   function submitRegistration(data, opts) {
-    var loginName = String(opts.login || "").trim().toLowerCase();
+    var loginName = normalizeLogin(opts.login);
     var password = String(opts.password || "");
     var name = String(opts.name || "").trim();
     var role = opts.role || "curator";
@@ -259,32 +313,118 @@
     if (!loginName || !password || !name) {
       return Promise.resolve({ ok: false, error: "Заполните ФИО, логин и пароль" });
     }
+    var loginErr = validateLogin(loginName);
+    if (loginErr) return Promise.resolve({ ok: false, error: loginErr });
+    var passErr = validatePassword(password);
+    if (passErr) return Promise.resolve({ ok: false, error: passErr });
     if (findUserByLogin(data, loginName)) {
       return Promise.resolve({ ok: false, error: "Такой логин уже есть" });
     }
     var pending = data.requests.some(function (r) {
-      return r.status === "pending" && String(r.login).toLowerCase() === loginName;
+      return r.status === "pending" && normalizeLogin(r.login) === loginName;
     });
     if (pending) {
-      return Promise.resolve({ ok: false, error: "Заявка с этим логином уже на рассмотрении" });
+      return Promise.resolve({
+        ok: false,
+        error: "Заявка с этим логином уже на рассмотрении",
+      });
     }
     if (!ROLES[role] || role === "admin") role = "curator";
-    var salt = makeSalt();
-    return hashPassword(password, salt).then(function (hash) {
-      data.requests.unshift({
-        id: uid(),
-        login: loginName,
-        name: name.slice(0, 80),
-        role: role,
-        groupId: groupId || "",
-        comment: comment.slice(0, 200),
-        salt: salt,
-        passwordHash: hash,
-        status: "pending",
-        createdAt: new Date().toISOString(),
+    if (role === "curator" && !groupId) {
+      return Promise.resolve({
+        ok: false,
+        error: "Куратору укажите желаемую группу",
       });
-      return { ok: true };
-    });
+    }
+    var salt = makeSalt();
+    return hashPassword(password, salt)
+      .then(function (hash) {
+        data.requests.unshift({
+          id: uid(),
+          login: loginName,
+          name: name.slice(0, 80),
+          role: role,
+          groupId: groupId || "",
+          comment: comment.slice(0, 200),
+          salt: salt,
+          passwordHash: hash,
+          status: "pending",
+          createdAt: new Date().toISOString(),
+        });
+        return { ok: true };
+      })
+      .catch(function (err) {
+        return {
+          ok: false,
+          error: (err && err.message) || "Не удалось отправить заявку",
+        };
+      });
+  }
+
+  function buildInvitePayload(user, password) {
+    return {
+      v: 1,
+      login: user.login,
+      name: user.name,
+      role: user.role,
+      groupIds: user.groupIds || [],
+      salt: user.salt,
+      passwordHash: user.passwordHash,
+      status: "active",
+      password: password || "",
+    };
+  }
+
+  function encodeInvite(payload) {
+    return btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "");
+  }
+
+  function decodeInvite(raw) {
+    var s = String(raw || "").replace(/-/g, "+").replace(/_/g, "/");
+    while (s.length % 4) s += "=";
+    return JSON.parse(decodeURIComponent(escape(atob(s))));
+  }
+
+  function acceptInvite(data, raw) {
+    try {
+      var payload = decodeInvite(raw);
+      if (!payload || !payload.login || !payload.passwordHash || !payload.salt) {
+        return { ok: false, error: "Ссылка-приглашение повреждена" };
+      }
+      var existing = findUserByLogin(data, payload.login);
+      if (existing) {
+        existing.name = payload.name || existing.name;
+        existing.role = payload.role || existing.role;
+        existing.salt = payload.salt;
+        existing.passwordHash = payload.passwordHash;
+        existing.groupIds = Array.isArray(payload.groupIds)
+          ? payload.groupIds.slice()
+          : existing.groupIds || [];
+        existing.status = "active";
+        setSession(existing.id);
+        return { ok: true, user: existing, updated: true };
+      }
+      var user = {
+        id: uid(),
+        login: normalizeLogin(payload.login),
+        name: String(payload.name || payload.login).slice(0, 80),
+        role: payload.role && ROLES[payload.role] ? payload.role : "curator",
+        salt: payload.salt,
+        passwordHash: payload.passwordHash,
+        groupIds: Array.isArray(payload.groupIds) ? payload.groupIds.slice() : [],
+        status: "active",
+        createdAt: new Date().toISOString(),
+      };
+      if (user.role === "admin") user.role = "administrator";
+      data.users.push(user);
+      setSession(user.id);
+      return { ok: true, user: user, updated: false };
+    } catch (e) {
+      return { ok: false, error: "Не удалось открыть приглашение" };
+    }
   }
 
   function approveRequest(data, requestId, overrides) {
@@ -306,6 +446,9 @@
     var groupIds = [];
     var groupId = (overrides && overrides.groupId) || req.groupId;
     if (groupId) groupIds = [groupId];
+    if (role === "curator" && !groupIds.length) {
+      return { ok: false, error: "Куратору нужно указать группу" };
+    }
     data.users.push({
       id: uid(),
       login: req.login,
@@ -761,6 +904,9 @@
     submitRegistration: submitRegistration,
     approveRequest: approveRequest,
     rejectRequest: rejectRequest,
+    buildInvitePayload: buildInvitePayload,
+    encodeInvite: encodeInvite,
+    acceptInvite: acceptInvite,
     addLog: addLog,
     logsCsv: logsCsv,
     clearLogs: clearLogs,
