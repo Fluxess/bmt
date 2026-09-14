@@ -1440,6 +1440,7 @@
           pick = pick.trim();
           if (!pick) {
             u.groupIds = [];
+            u.groupNames = [];
             logAction("Группа снята", "@" + u.login);
           } else {
             var found = data.groups.find(function (x) {
@@ -1450,6 +1451,7 @@
               return;
             }
             u.groupIds = [found.id];
+            u.groupNames = [found.name];
             logAction("Группа прикреплена", "@" + u.login + " → " + found.name);
           }
           if (!persist()) return;

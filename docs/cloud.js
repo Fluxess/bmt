@@ -273,27 +273,64 @@
       });
   }
 
-  function remapUserGroups(users, groups) {
+  function buildIdToName(groups) {
+    var map = {};
+    (groups || []).forEach(function (g) {
+      if (g && g.id) map[g.id] = String(g.name || "");
+    });
+    return map;
+  }
+
+  function remapUserGroups(users, groups, idNameHints) {
     var byName = {};
     (groups || []).forEach(function (g) {
-      byName[String(g.name).toLowerCase()] = g.id;
+      byName[String(g.name || "").toLowerCase()] = g.id;
     });
+    var hints = idNameHints || {};
     (users || []).forEach(function (u) {
       if (!Array.isArray(u.groupIds)) u.groupIds = [];
-      // keep ids that exist; drop orphans
-      var existing = {};
-      groups.forEach(function (g) {
-        existing[g.id] = g.name;
+      var names = [];
+      // 1) имена, сохранённые на пользователе
+      if (Array.isArray(u.groupNames)) {
+        u.groupNames.forEach(function (n) {
+          if (n) names.push(String(n));
+        });
+      }
+      // 2) по текущим/старым id → имя
+      u.groupIds.forEach(function (id) {
+        var n = hints[id] || "";
+        (groups || []).forEach(function (g) {
+          if (g.id === id) n = g.name;
+        });
+        if (n) names.push(String(n));
       });
-      u.groupIds = u.groupIds.filter(function (id) {
-        return !!existing[id];
+      var ids = [];
+      var seen = {};
+      names.forEach(function (name) {
+        var id = byName[String(name).toLowerCase()];
+        if (id && !seen[id]) {
+          seen[id] = true;
+          ids.push(id);
+        }
       });
+      u.groupIds = ids;
+      u.groupNames = ids.map(function (id) {
+        var g = (groups || []).find(function (x) {
+          return x.id === id;
+        });
+        return g ? g.name : "";
+      }).filter(Boolean);
     });
     return users;
   }
 
   function mergeStates(localData, remoteState) {
     var remote = remoteState || emptyState();
+    var idHints = Object.assign(
+      {},
+      buildIdToName(localData.groups),
+      buildIdToName(remote.groups)
+    );
     var out = {
       version: 3,
       updatedAt: "",
@@ -311,7 +348,7 @@
         );
       }),
     };
-    out.users = remapUserGroups(out.users, out.groups);
+    out.users = remapUserGroups(out.users, out.groups, idHints);
     out.logs.sort(function (a, b) {
       return String(b.at || "").localeCompare(String(a.at || ""));
     });

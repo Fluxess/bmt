@@ -281,6 +281,12 @@
     var salt = makeSalt();
     return hashPassword(password, salt)
       .then(function (hash) {
+        var groupNames = groupIds.map(function (id) {
+          var g = data.groups.find(function (x) {
+            return x.id === id;
+          });
+          return g ? g.name : "";
+        }).filter(Boolean);
         var user = {
           id: uid(),
           login: loginName,
@@ -289,6 +295,7 @@
           salt: salt,
           passwordHash: hash,
           groupIds: groupIds,
+          groupNames: groupNames,
           status: "active",
           createdAt: new Date().toISOString(),
         };
@@ -512,6 +519,12 @@
         return { ok: false, error: "Ссылка-приглашение повреждена" };
       }
       var groupIds = resolveGroupIdsFromInvite(data, payload);
+      var groupNames = groupIds.map(function (id) {
+        var g = data.groups.find(function (x) {
+          return x.id === id;
+        });
+        return g ? g.name : "";
+      }).filter(Boolean);
       var existing = findUserByLogin(data, payload.login);
       if (existing) {
         existing.name = payload.name || existing.name;
@@ -519,6 +532,11 @@
         existing.salt = payload.salt;
         existing.passwordHash = payload.passwordHash;
         existing.groupIds = groupIds;
+        existing.groupNames = groupNames.length
+          ? groupNames
+          : Array.isArray(payload.groupNames)
+            ? payload.groupNames.slice()
+            : existing.groupNames || [];
         existing.status = "active";
         setSession(existing.id);
         return { ok: true, user: existing, updated: true };
@@ -531,6 +549,11 @@
         salt: payload.salt,
         passwordHash: payload.passwordHash,
         groupIds: groupIds,
+        groupNames: groupNames.length
+          ? groupNames
+          : Array.isArray(payload.groupNames)
+            ? payload.groupNames.slice()
+            : [],
         status: "active",
         createdAt: new Date().toISOString(),
       };
@@ -568,6 +591,12 @@
     if (role === "curator" && !groupIds.length) {
       return { ok: false, error: "Куратору нужно указать группу" };
     }
+    var groupNames = groupIds.map(function (id) {
+      var g = data.groups.find(function (x) {
+        return x.id === id;
+      });
+      return g ? g.name : "";
+    }).filter(Boolean);
     var user = {
       id: uid(),
       login: req.login,
@@ -576,6 +605,7 @@
       salt: req.salt,
       passwordHash: req.passwordHash,
       groupIds: groupIds,
+      groupNames: groupNames,
       status: "active",
       createdAt: new Date().toISOString(),
     };
