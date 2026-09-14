@@ -878,7 +878,51 @@ textarea {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
+.share-panel {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.share-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.share-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.share-qr img {
+  width: 160px;
+  height: 160px;
+  border-radius: 12px;
+  background: #fff;
+  padding: 6px;
+}
+
+.share-qr small {
+  color: var(--muted, #a9b3a4);
+  text-align: center;
+}
+
+.share-url {
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.paste-request textarea {
+  min-height: 72px;
+  font-size: 13px;
+}
   *,
   *::before,
   *::after {

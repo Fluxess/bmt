@@ -579,17 +579,24 @@
     if (state.lastRequestLink) {
       var done = el(
         '<section class="card">' +
-          "<h1>Заявка готова</h1>" +
-          '<p class="status">На другом браузере админ её <strong>не увидит сам</strong>. Скопируйте ссылку и отправьте админу — он откроет её у себя, и заявка появится в «Заявки».</p>' +
+          "<h1>Остался один шаг</h1>" +
           '<p class="status">Логин: <strong>@' +
           escapeHtml(state.lastRequestLink.login) +
-          "</strong></p>" +
+          "</strong>. Нажмите <strong>Отправить…</strong> и выберите чат с админом (Telegram / VK). Он откроет ссылку — заявка появится у него в «Заявки».</p>" +
+          '<div class="share-host"></div>' +
           '<div class="toolbar"></div></section>'
       );
-      var copyBtn = el('<button class="btn" type="button">Копировать ссылку для админа</button>');
-      copyBtn.addEventListener("click", function () {
-        copyText(state.lastRequestLink.url, "Ссылка скопирована — отправьте админу");
+      mountSharePanel(done.querySelector(".share-host"), {
+        url: state.lastRequestLink.url,
+        title: "Заявка BMT",
+        hint: "",
+        shareText:
+          "Заявка на кабинет BMT @" +
+          state.lastRequestLink.login +
+          ". Откройте ссылку под админом:",
+        autoShare: !!state.lastRequestLink.autoShare,
       });
+      state.lastRequestLink.autoShare = false;
       var again = el('<button class="btn btn-soft" type="button">Новая заявка</button>');
       again.addEventListener("click", function () {
         state.lastRequestLink = null;
@@ -600,7 +607,6 @@
         state.lastRequestLink = null;
         navigate("login", true);
       });
-      done.querySelector(".toolbar").appendChild(copyBtn);
       done.querySelector(".toolbar").appendChild(again);
       done.querySelector(".toolbar").appendChild(toLogin);
       root.appendChild(done);
@@ -610,7 +616,7 @@
     var card = el(
       '<section class="card">' +
         "<h1>Заявка на личный кабинет</h1>" +
-        '<p class="status">После отправки получите ссылку и отправьте её админу (Telegram / VK). Иначе заявка останется только в этом браузере.</p>' +
+        '<p class="status">Заполните форму — дальше одним нажатием отправите заявку админу в Telegram или VK.</p>' +
         '<form class="stack">' +
         '<label class="lbl">ФИО</label>' +
         '<input name="name" required maxlength="80" placeholder="Иванова А. С." />' +
@@ -624,7 +630,7 @@
         '<select name="groupId"></select>' +
         '<label class="lbl">Комментарий</label>' +
         '<textarea name="comment" rows="3" maxlength="200" placeholder="Например: куратор группы 616"></textarea>' +
-        '<button class="btn" type="submit">Создать заявку</button></form>' +
+        '<button class="btn" type="submit">Создать и отправить админу</button></form>' +
         '<p class="status"><button class="link" type="button" id="go-login">Уже есть кабинет — войти</button></p>' +
         "</section>"
     );
@@ -671,8 +677,9 @@
           state.lastRequestLink = {
             login: res.request.login,
             url: url,
+            autoShare: true,
           };
-          toast("Скопируйте ссылку и отправьте админу");
+          toast("Отправьте заявку админу одним нажатием");
           render();
         })
         .catch(function () {
@@ -760,12 +767,45 @@
   }
 
   function renderAdminRequests(pending) {
-    renderAdminPageHead("Заявки", "Заявки на создание личного кабинета.");
+    renderAdminPageHead(
+      "Заявки",
+      "Примите заявку или вставьте ссылку, которую прислал преподаватель."
+    );
+
+    var pasteCard = el(
+      '<section class="card">' +
+        "<h2>Получил ссылку в Telegram / VK?</h2>" +
+        '<p class="status">Вставьте сюда ссылку из сообщения — заявка сразу появится в списке. Открывать ссылку в новой вкладке не обязательно.</p>' +
+        '<form class="stack paste-request">' +
+        '<label class="lbl">Ссылка заявки</label>' +
+        '<textarea name="paste" rows="3" placeholder="https://fluxess.github.io/bmt/#/request/…" required></textarea>' +
+        '<button class="btn" type="submit">Добавить заявку</button></form></section>'
+    );
+    pasteCard.querySelector("form").addEventListener("submit", function (e) {
+      e.preventDefault();
+      var raw = new FormData(e.target).get("paste");
+      var res = importRequestFromPaste(raw);
+      if (!res.ok) {
+        toast(res.error, true);
+        return;
+      }
+      if (!persist()) return;
+      logAction(
+        "Заявка импортирована",
+        "@" + res.login + (res.already ? " (уже была)" : ""),
+        { target: "@" + res.login }
+      );
+      persist();
+      toast(res.already ? "Эта заявка уже в списке" : "Заявка добавлена");
+      e.target.reset();
+      render();
+    });
+    root.appendChild(pasteCard);
+
     var reqCard = el(
       '<section class="card"><h2>Ожидают решения (' +
         pending.length +
-        ")</h2>" +
-        '<p class="status">Заявки с другого браузера появляются здесь только если преподаватель прислал ссылку заявки и вы её открыли. После принятия отправьте ему ссылку-приглашение.</p></section>'
+        ")</h2></section>"
     );
     if (!pending.length) {
       reqCard.appendChild(el('<p class="status">Новых заявок нет.</p>'));
@@ -846,9 +886,10 @@
               login: res.user.login,
               password: "(пароль, который задал при заявке)",
               url: inviteUrlFor(res.user),
+              autoShare: true,
             };
           }
-          toast("Кабинет создан — отправьте ссылку преподавателю");
+          toast("Готово — отправьте ссылку преподавателю");
           navigate("users", true);
         });
         no.addEventListener("click", function () {
@@ -911,6 +952,138 @@
     } else {
       prompt("Скопируйте вручную", text);
     }
+  }
+
+  function extractShareToken(raw) {
+    var s = String(raw || "").trim();
+    if (!s) return "";
+    var m = s.match(/#\/(?:request|invite)\/([A-Za-z0-9_-]+)/i);
+    if (m) return m[1];
+    m = s.match(/\/(?:request|invite)\/([A-Za-z0-9_-]+)/i);
+    if (m) return m[1];
+    if (/^[A-Za-z0-9_-]{16,}$/.test(s)) return s;
+    return s;
+  }
+
+  function telegramShareUrl(url, text) {
+    return (
+      "https://t.me/share/url?url=" +
+      encodeURIComponent(url) +
+      "&text=" +
+      encodeURIComponent(text || "")
+    );
+  }
+
+  function vkShareUrl(url, text) {
+    return (
+      "https://vk.com/share.php?url=" +
+      encodeURIComponent(url) +
+      "&title=" +
+      encodeURIComponent(text || "BMT")
+    );
+  }
+
+  function qrImageUrl(url) {
+    return (
+      "https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=8&data=" +
+      encodeURIComponent(url)
+    );
+  }
+
+  function openExternal(url) {
+    var a = document.createElement("a");
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  function tryNativeShare(url, title, text) {
+    if (!navigator.share) return Promise.resolve(false);
+    return navigator
+      .share({ title: title || "BMT", text: text || "", url: url })
+      .then(function () {
+        return true;
+      })
+      .catch(function () {
+        return false;
+      });
+  }
+
+  /** Панель: Отправить / Telegram / VK / копировать / QR */
+  function mountSharePanel(host, opts) {
+    var url = opts.url;
+    var title = opts.title || "Отправить";
+    var hint = opts.hint || "";
+    var shareText = opts.shareText || title;
+    var autoShare = !!opts.autoShare;
+
+    var panel = el(
+      '<div class="share-panel">' +
+        (hint ? '<p class="status">' + escapeHtml(hint) + "</p>" : "") +
+        '<div class="share-actions"></div>' +
+        '<div class="share-qr">' +
+        '<img alt="QR-код ссылки" width="160" height="160" />' +
+        "<small>Или покажите QR — отсканируют камерой</small></div>" +
+        '<label class="lbl">Ссылка</label>' +
+        '<input class="stack-input share-url" readonly />' +
+        "</div>"
+    );
+    var actions = panel.querySelector(".share-actions");
+    var img = panel.querySelector("img");
+    var urlInput = panel.querySelector(".share-url");
+    img.src = qrImageUrl(url);
+    img.loading = "lazy";
+    urlInput.value = url;
+    urlInput.addEventListener("click", function () {
+      urlInput.select();
+      copyText(url, "Ссылка скопирована");
+    });
+
+    var sendBtn = el('<button class="btn" type="button">Отправить…</button>');
+    sendBtn.addEventListener("click", function () {
+      tryNativeShare(url, "BMT", shareText).then(function (ok) {
+        if (ok) {
+          toast("Отправлено");
+          return;
+        }
+        openExternal(telegramShareUrl(url, shareText));
+      });
+    });
+    var tgBtn = el('<button class="btn btn-soft" type="button">Telegram</button>');
+    tgBtn.addEventListener("click", function () {
+      openExternal(telegramShareUrl(url, shareText));
+    });
+    var vkBtn = el('<button class="btn btn-soft" type="button">VK</button>');
+    vkBtn.addEventListener("click", function () {
+      openExternal(vkShareUrl(url, shareText));
+    });
+    var copyBtn = el('<button class="btn btn-soft" type="button">Копировать</button>');
+    copyBtn.addEventListener("click", function () {
+      copyText(url, "Ссылка скопирована");
+    });
+    actions.appendChild(sendBtn);
+    actions.appendChild(tgBtn);
+    actions.appendChild(vkBtn);
+    actions.appendChild(copyBtn);
+    host.appendChild(panel);
+
+    if (autoShare) {
+      setTimeout(function () {
+        tryNativeShare(url, "BMT", shareText);
+      }, 400);
+    }
+    return panel;
+  }
+
+  function importRequestFromPaste(raw) {
+    var token = extractShareToken(raw);
+    if (!token) {
+      return { ok: false, error: "Вставьте ссылку заявки из сообщения" };
+    }
+    return store.importRequest(data, token);
   }
 
   function renderAdminCreate() {
@@ -988,8 +1161,9 @@
             login: res.user.login,
             password: password,
             url: link,
+            autoShare: true,
           };
-          toast("Кабинет @" + res.user.login + " создан");
+          toast("Отправьте ссылку преподавателю");
           navigate("users", true);
         })
         .catch(function () {
@@ -1004,24 +1178,33 @@
     if (state.lastInvite) {
       var inviteCard = el(
         '<section class="card">' +
-          "<h2>Ссылка для @" +
+          "<h2>Отправьте кабинет @" +
           escapeHtml(state.lastInvite.login) +
           "</h2>" +
-          '<p class="status">Отправьте ссылку преподавателю. Пароль: <strong>' +
-          escapeHtml(state.lastInvite.password) +
-          "</strong> (если создавали вы) или тот, что он указал в заявке.</p>" +
+          '<p class="status">Преподаватель откроет ссылку на своём телефоне и войдёт паролем из заявки' +
+          (state.lastInvite.password &&
+          state.lastInvite.password.indexOf("пароль") === -1
+            ? ": <strong>" + escapeHtml(state.lastInvite.password) + "</strong>"
+            : "") +
+          ".</p>" +
+          '<div class="share-host"></div>' +
           '<div class="toolbar"></div></section>'
       );
-      var copyBtn = el('<button class="btn" type="button">Копировать ссылку</button>');
-      copyBtn.addEventListener("click", function () {
-        copyText(state.lastInvite.url, "Ссылка скопирована");
+      mountSharePanel(inviteCard.querySelector(".share-host"), {
+        url: state.lastInvite.url,
+        title: "Кабинет BMT",
+        shareText:
+          "Ваш кабинет BMT @" +
+          state.lastInvite.login +
+          ". Откройте ссылку и войдите своим паролем:",
+        autoShare: !!state.lastInvite.autoShare,
       });
+      state.lastInvite.autoShare = false;
       var hideBtn = el('<button class="btn btn-soft" type="button">Скрыть</button>');
       hideBtn.addEventListener("click", function () {
         state.lastInvite = null;
         render();
       });
-      inviteCard.querySelector(".toolbar").appendChild(copyBtn);
       inviteCard.querySelector(".toolbar").appendChild(hideBtn);
       root.appendChild(inviteCard);
     }
@@ -1149,14 +1332,21 @@
               login: u.login,
               password: next,
               url: inviteUrlFor(u, next),
+              autoShare: true,
             };
-            toast("Пароль обновлён — скопируйте ссылку ниже");
+            toast("Отправьте новую ссылку преподавателю");
             render();
           });
         });
         var invBtn = el('<button class="btn btn-soft" type="button">Ссылка</button>');
         invBtn.addEventListener("click", function () {
-          copyText(inviteUrlFor(u), "Ссылка-приглашение скопирована");
+          state.lastInvite = {
+            login: u.login,
+            password: "",
+            url: inviteUrlFor(u),
+            autoShare: true,
+          };
+          render();
         });
         var toggle = el(
           '<button class="btn btn-ghost" type="button">' +
