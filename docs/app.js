@@ -893,7 +893,7 @@
   }
 
   function inviteUrlFor(user, password) {
-    var token = store.encodeInvite(store.buildInvitePayload(user, password || ""));
+    var token = store.encodeInvite(store.buildInvitePayload(data, user, password || ""));
     var base = location.href.split("#")[0];
     return base + "#/invite/" + token;
   }

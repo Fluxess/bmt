@@ -442,14 +442,46 @@
     }
   }
 
-  function buildInvitePayload(user, password) {
+  function groupNamesForIds(data, groupIds) {
+    return (groupIds || [])
+      .map(function (id) {
+        var g = data.groups.find(function (x) {
+          return x.id === id;
+        });
+        return g ? g.name : "";
+      })
+      .filter(Boolean);
+  }
+
+  function resolveGroupIdsFromInvite(data, payload) {
+    ensurePresetGroups(data);
+    var names = Array.isArray(payload.groupNames) ? payload.groupNames.slice() : [];
+    if (!names.length && Array.isArray(payload.groupIds)) {
+      // старые ссылки: пробуем совпадение id, иначе пусто
+      return payload.groupIds.filter(function (id) {
+        return data.groups.some(function (g) {
+          return g.id === id;
+        });
+      });
+    }
+    var ids = [];
+    names.forEach(function (name) {
+      var id = resolveGroupIdByName(data, name, "");
+      if (id && ids.indexOf(id) === -1) ids.push(id);
+    });
+    return ids;
+  }
+
+  function buildInvitePayload(data, user, password) {
+    var groupIds = user.groupIds || [];
     return {
       v: 1,
       kind: "invite",
       login: user.login,
       name: user.name,
       role: user.role,
-      groupIds: user.groupIds || [],
+      groupIds: groupIds,
+      groupNames: groupNamesForIds(data, groupIds),
       salt: user.salt,
       passwordHash: user.passwordHash,
       status: "active",
@@ -479,15 +511,14 @@
       if (!payload || !payload.login || !payload.passwordHash || !payload.salt) {
         return { ok: false, error: "Ссылка-приглашение повреждена" };
       }
+      var groupIds = resolveGroupIdsFromInvite(data, payload);
       var existing = findUserByLogin(data, payload.login);
       if (existing) {
         existing.name = payload.name || existing.name;
         existing.role = payload.role || existing.role;
         existing.salt = payload.salt;
         existing.passwordHash = payload.passwordHash;
-        existing.groupIds = Array.isArray(payload.groupIds)
-          ? payload.groupIds.slice()
-          : existing.groupIds || [];
+        existing.groupIds = groupIds;
         existing.status = "active";
         setSession(existing.id);
         return { ok: true, user: existing, updated: true };
@@ -499,7 +530,7 @@
         role: payload.role && ROLES[payload.role] ? payload.role : "curator",
         salt: payload.salt,
         passwordHash: payload.passwordHash,
-        groupIds: Array.isArray(payload.groupIds) ? payload.groupIds.slice() : [],
+        groupIds: groupIds,
         status: "active",
         createdAt: new Date().toISOString(),
       };
