@@ -30,12 +30,50 @@
   }
   var me = null;
 
+  var cloudTimer = null;
+  var cloudStatus = { at: "", ok: null, text: "" };
+
   function persist() {
+    data.updatedAt = new Date().toISOString();
     if (!store.save(data)) {
       toast("Не хватило места в браузере. Удалите фото или сделайте бэкап.", true);
       return false;
     }
+    scheduleCloudSync();
     return true;
+  }
+
+  function scheduleCloudSync() {
+    if (!window.BmtCloud || !window.BmtCloud.syncNow) return;
+    if (cloudTimer) clearTimeout(cloudTimer);
+    cloudTimer = setTimeout(function () {
+      cloudTimer = null;
+      runCloudSync(false);
+    }, 1400);
+  }
+
+  function runCloudSync(forceRender) {
+    if (!window.BmtCloud || !window.BmtCloud.syncNow) {
+      return Promise.resolve({ ok: false });
+    }
+    cloudStatus.text = "Синхронизация…";
+    return window.BmtCloud.syncNow(data).then(function (res) {
+      if (res && res.queued) return res;
+      if (res && res.ok) {
+        store.save(data);
+        cloudStatus.ok = true;
+        cloudStatus.at = new Date().toISOString();
+        cloudStatus.text =
+          "Облако обновлено" +
+          (res.push && res.push.stripped ? " (фото урезаны по размеру)" : "");
+      } else {
+        cloudStatus.ok = false;
+        cloudStatus.text =
+          "Облако: " + ((res && res.error) || (res && res.push && res.push.error) || "ошибка");
+      }
+      if (forceRender) render();
+      return res;
+    });
   }
 
   function refreshMe() {
@@ -396,6 +434,22 @@
     );
     root.appendChild(card);
 
+    var syncCard = el(
+      '<section class="card"><h2>Облако</h2><p class="status">' +
+        escapeHtml(cloudStatus.text || "Баллы, группы и логи синхронизируются между устройствами.") +
+        '</p><div class="toolbar"></div></section>'
+    );
+    var syncBtn = el('<button class="btn" type="button">Синхронизировать</button>');
+    syncBtn.addEventListener("click", function () {
+      runCloudSync(false).then(function (res) {
+        toast(res && res.ok ? "Синхронизировано" : cloudStatus.text || "Ошибка", !(res && res.ok));
+        refreshMe();
+        render();
+      });
+    });
+    syncCard.querySelector(".toolbar").appendChild(syncBtn);
+    root.appendChild(syncCard);
+
     var list = el('<section class="card"><h2>Ваши группы</h2></section>');
     if (!groups.length) {
       list.appendChild(el('<p class="status">Нет прикреплённых групп.</p>'));
@@ -743,6 +797,21 @@
 
   function renderAdminOverview(stats) {
     renderAdminPageHead("Обзор", "Сводка по кабинетам, группам и журналу действий.");
+    var cloudCard = el(
+      '<section class="card"><h2>Облако</h2><p class="status" id="ov-cloud">' +
+        escapeHtml(cloudStatus.text || "Данные синхронизируются между устройствами автоматически.") +
+        '</p><div class="toolbar"></div></section>'
+    );
+    var btn = el('<button class="btn btn-soft" type="button">Синхронизировать</button>');
+    btn.addEventListener("click", function () {
+      cloudCard.querySelector("#ov-cloud").textContent = "Синхронизация…";
+      runCloudSync(false).then(function (res) {
+        toast(res && res.ok ? "Облако обновлено" : cloudStatus.text || "Ошибка", !(res && res.ok));
+        render();
+      });
+    });
+    cloudCard.querySelector(".toolbar").appendChild(btn);
+    root.appendChild(cloudCard);
     var card = el('<section class="card"><h2>Сводка</h2><div class="stat-grid"></div></section>');
     var grid = card.querySelector(".stat-grid");
     [
@@ -807,21 +876,12 @@
   }
 
   function syncCloudRequests() {
-    var cloud = window.BmtCloud;
-    if (!cloud || !cloud.pullPending) return Promise.resolve(0);
-    return cloud.pullPending().then(function (list) {
-      var added = 0;
-      (list || []).forEach(function (payload) {
-        if (!payload || !payload.login || !payload.passwordHash) return;
-        var token = store.encodeInvite(payload);
-        var res = store.importRequest(data, token);
-        if (res.ok && !res.already) added += 1;
-      });
-      if (added && persist()) {
-        logAction("Облако", "Подтянуто заявок: " + added);
-        persist();
-      }
-      return added;
+    return runCloudSync(false).then(function (res) {
+      if (!res || !res.ok) return 0;
+      // after merge, pending count may have grown — caller re-renders
+      return (data.requests || []).filter(function (r) {
+        return r.status === "pending";
+      }).length;
     });
   }
 
@@ -833,28 +893,39 @@
 
     var syncCard = el(
       '<section class="card">' +
-        "<h2>Облако заявок</h2>" +
-        '<p class="status" id="cloud-sync-status">Проверяем новые заявки…</p>' +
+        "<h2>Облако</h2>" +
+        '<p class="status" id="cloud-sync-status">' +
+        escapeHtml(cloudStatus.text || "Группы, баллы, кабинеты, заявки и логи — в общем облаке.") +
+        "</p>" +
         '<div class="toolbar"></div></section>'
     );
-    var syncBtn = el('<button class="btn btn-soft" type="button">Обновить сейчас</button>');
-    function runSync(silent) {
+    var syncBtn = el('<button class="btn" type="button">Синхронизировать сейчас</button>');
+    function runSync() {
       var statusEl = syncCard.querySelector("#cloud-sync-status");
-      if (!silent) statusEl.textContent = "Обновляем…";
-      syncCloudRequests().then(function (added) {
-        statusEl.textContent =
-          added > 0
-            ? "Добавлено новых: " + added
-            : "Новых заявок в облаке нет (или уже загружены).";
-        if (added > 0) render();
+      statusEl.textContent = "Синхронизация…";
+      var before = (data.requests || []).filter(function (r) {
+        return r.status === "pending";
+      }).length;
+      runCloudSync(false).then(function (res) {
+        var after = (data.requests || []).filter(function (r) {
+          return r.status === "pending";
+        }).length;
+        if (res && res.ok) {
+          statusEl.textContent =
+            cloudStatus.text +
+            (after > before ? " · новых заявок: " + (after - before) : "");
+          toast("Данные синхронизированы");
+          render();
+        } else {
+          statusEl.textContent = cloudStatus.text || "Не удалось синхронизировать";
+          toast(cloudStatus.text || "Ошибка облака", true);
+        }
       });
     }
-    syncBtn.addEventListener("click", function () {
-      runSync(false);
-    });
+    syncBtn.addEventListener("click", runSync);
     syncCard.querySelector(".toolbar").appendChild(syncBtn);
     root.appendChild(syncCard);
-    runSync(true);
+    if (!cloudStatus.at) runSync();
 
     var pasteCard = el(
       '<section class="card">' +
@@ -1506,7 +1577,7 @@
   function renderAdminLogs() {
     renderAdminPageHead(
       "Логи",
-      "Журнал действий. До 800 записей: IP, платформа, UA, экран, язык, часовой пояс, сеть, VK-параметры."
+      "Общий журнал (облако). До 800 записей: IP, платформа, UA, экран, язык, часовой пояс, сеть, VK."
     );
     var card = el(
       '<section class="card"><h2>Журнал</h2>' +
@@ -2687,17 +2758,42 @@
   }
 
   store.refreshClientMeta().finally(function () {
-    store.ensureAdmin(data).then(function () {
-      store.save(data);
-      refreshMe();
-      initVk();
-      if (!location.hash || location.hash === "#" || location.hash === "#/") {
-        history.replaceState(null, "", "#/" + defaultScreen());
-      }
-      window.addEventListener("hashchange", function () {
+    function boot() {
+      store.ensureAdmin(data).then(function () {
+        store.save(data);
+        refreshMe();
+        initVk();
+        if (!location.hash || location.hash === "#" || location.hash === "#/") {
+          history.replaceState(null, "", "#/" + defaultScreen());
+        }
+        window.addEventListener("hashchange", function () {
+          render();
+        });
         render();
+        setTimeout(function () {
+          runCloudSync(false).then(function (res) {
+            if (res && res.ok) {
+              store.ensureAdmin(data).then(function () {
+                store.save(data);
+                refreshMe();
+                render();
+              });
+            }
+          });
+        }, 600);
       });
-      render();
-    });
+    }
+
+    if (window.BmtCloud && window.BmtCloud.pullAndMerge) {
+      window.BmtCloud.pullAndMerge(data)
+        .then(function () {
+          boot();
+        })
+        .catch(function () {
+          boot();
+        });
+    } else {
+      boot();
+    }
   });
 })();
