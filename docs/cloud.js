@@ -8,18 +8,15 @@
   var INBOX_FILE = "bmt-inbox.json";
   var API = "https://api.github.com/gists/" + GIST_ID;
   var MAX_CHARS = 900000;
-  var _a = "Z2hvX25pVFFMWFZVSHVWQ1ROaWYz";
-  var _b = "TFFkWUIxRkNJV0hmdzNtb0doOA==";
+  // секрет разворачивается только через BmtGuard на разрешённом домене
+  var _p = ["AQQaJwsaJ38rMSI9PRd4KjsyCwtH", "YTYRODBVazV4MSQTD1YeHGkPUQ=="];
 
   var busy = false;
   var queued = null;
 
   function token() {
-    try {
-      return decodeURIComponent(escape(atob(_a + _b)));
-    } catch (e) {
-      return "";
-    }
+    if (!global.BmtGuard || !global.BmtGuard.unwrapSecret) return "";
+    return global.BmtGuard.unwrapSecret(_p) || "";
   }
 
   function headers(write) {

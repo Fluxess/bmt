@@ -2758,6 +2758,8 @@
   }
 
   store.refreshClientMeta().finally(function () {
+    if (window.BmtGuard && !window.BmtGuard.assertAllowed()) return;
+
     function boot() {
       store.ensureAdmin(data).then(function () {
         store.save(data);
