@@ -11,6 +11,8 @@
     logSearch: "",
     lastInvite: null,
     inviteToken: null,
+    requestToken: null,
+    lastRequestLink: null,
   };
 
   var ADMIN_PAGES = {
@@ -147,6 +149,7 @@
       login: "Вход",
       register: "Регистрация",
       invite: "Приглашение",
+      request: "Заявка",
       groups: "Группы",
       group: "Группа",
       student: "Студент",
@@ -196,6 +199,14 @@
         inviteToken: parts.slice(1).join("/"),
       };
     }
+    if (screen === "request" && parts[1]) {
+      return {
+        screen: "request",
+        groupId: null,
+        studentId: null,
+        requestToken: parts.slice(1).join("/"),
+      };
+    }
     if (screen === "admin-groups" || screen === "curators") {
       screen = "assignments";
     }
@@ -218,7 +229,7 @@
       };
       history.replaceState(null, "", "#/" + route.screen);
     }
-    if (!me && route.screen !== "login" && route.screen !== "register" && route.screen !== "invite") {
+    if (!me && route.screen !== "login" && route.screen !== "register" && route.screen !== "invite" && route.screen !== "request") {
       route = { screen: "login", groupId: null, studentId: null };
       history.replaceState(null, "", "#/login");
     }
@@ -230,8 +241,8 @@
       };
       history.replaceState(null, "", "#/" + route.screen);
     }
-    if (me && route.screen === "invite") {
-      // allow invite even when logged in — switches account
+    if (me && (route.screen === "invite" || route.screen === "request")) {
+      // allow special links
     } else if (ADMIN_PAGES[route.screen] && me && !store.isAdmin(me)) {
       route = { screen: "groups", groupId: null, studentId: null };
       history.replaceState(null, "", "#/groups");
@@ -240,6 +251,7 @@
     state.groupId = route.groupId;
     state.studentId = route.studentId;
     state.inviteToken = route.inviteToken || null;
+    state.requestToken = route.requestToken || null;
   }
 
   function navigate(path, replace) {
@@ -334,6 +346,10 @@
       renderInvite();
       return;
     }
+    if (state.screen === "request") {
+      renderRequestImport();
+      return;
+    }
     if (!me) {
       if (state.screen === "register") renderRegister();
       else renderLogin();
@@ -426,7 +442,7 @@
     var card = el(
       '<section class="card">' +
         "<h1>Приглашение в кабинет</h1>" +
-        '<p class="status">Ссылка добавит ваш личный кабинет на это устройство.</p>' +
+        '<p class="status">Ссылка добавит ваш личный кабинет на это устройство. Затем войдите своим паролем.</p>' +
         '<div class="toolbar"></div></section>'
     );
     var tools = card.querySelector(".toolbar");
@@ -457,12 +473,67 @@
     root.appendChild(card);
   }
 
+  function requestShareUrl(req) {
+    var token = store.encodeInvite(store.buildRequestPayload(req));
+    return location.href.split("#")[0] + "#/request/" + token;
+  }
+
+  function renderRequestImport() {
+    var card = el(
+      '<section class="card">' +
+        "<h1>Заявка с другого устройства</h1>" +
+        '<p class="status">Откройте эту ссылку под админом — заявка попадёт в раздел «Заявки».</p>' +
+        '<div class="toolbar"></div></section>'
+    );
+    var tools = card.querySelector(".toolbar");
+
+    function doImport() {
+      var res = store.importRequest(data, state.requestToken || "");
+      if (!res.ok) {
+        toast(res.error, true);
+        return;
+      }
+      if (!persist()) return;
+      if (me && store.isAdmin(me)) {
+        logAction(
+          "Заявка импортирована",
+          "@" + res.login + (res.already ? " (уже была)" : ""),
+          { target: "@" + res.login }
+        );
+        persist();
+        toast(res.already ? "Заявка уже в списке" : "Заявка добавлена");
+        navigate("requests", true);
+        return;
+      }
+      toast(
+        res.already
+          ? "Заявка уже сохранена. Войдите как админ → Заявки."
+          : "Заявка сохранена. Войдите как админ → Заявки."
+      );
+      navigate("login", true);
+    }
+
+    var accept = el('<button class="btn" type="button">Добавить заявку сюда</button>');
+    accept.addEventListener("click", doImport);
+    var cancel = el('<button class="btn btn-soft" type="button">Отмена</button>');
+    cancel.addEventListener("click", function () {
+      navigate(me ? defaultScreen() : "login", true);
+    });
+    tools.appendChild(accept);
+    tools.appendChild(cancel);
+    root.appendChild(card);
+
+    // auto-import when admin already logged in
+    if (me && store.isAdmin(me)) {
+      doImport();
+    }
+  }
+
   function renderLogin() {
     var card = el(
       '<section class="card">' +
         "<h1>Вход в личный кабинет</h1>" +
-        '<p class="status">У каждого сотрудника — свой кабинет. Куратору прикрепляется группа.</p>' +
-        '<p class="status">Если кабинет создал админ на другом компьютере — откройте ссылку-приглашение или восстановите бэкап JSON.</p>' +
+        '<p class="status">Данные хранятся в браузере устройства. Между телефонами кабинеты передаются ссылкой-приглашением или бэкапом.</p>' +
         '<form class="stack">' +
         '<label class="lbl">Логин</label>' +
         '<input name="login" required autocomplete="username" placeholder="логин латиницей" />' +
@@ -505,10 +576,41 @@
   }
 
   function renderRegister() {
+    if (state.lastRequestLink) {
+      var done = el(
+        '<section class="card">' +
+          "<h1>Заявка готова</h1>" +
+          '<p class="status">На другом браузере админ её <strong>не увидит сам</strong>. Скопируйте ссылку и отправьте админу — он откроет её у себя, и заявка появится в «Заявки».</p>' +
+          '<p class="status">Логин: <strong>@' +
+          escapeHtml(state.lastRequestLink.login) +
+          "</strong></p>" +
+          '<div class="toolbar"></div></section>'
+      );
+      var copyBtn = el('<button class="btn" type="button">Копировать ссылку для админа</button>');
+      copyBtn.addEventListener("click", function () {
+        copyText(state.lastRequestLink.url, "Ссылка скопирована — отправьте админу");
+      });
+      var again = el('<button class="btn btn-soft" type="button">Новая заявка</button>');
+      again.addEventListener("click", function () {
+        state.lastRequestLink = null;
+        render();
+      });
+      var toLogin = el('<button class="btn btn-ghost" type="button">Ко входу</button>');
+      toLogin.addEventListener("click", function () {
+        state.lastRequestLink = null;
+        navigate("login", true);
+      });
+      done.querySelector(".toolbar").appendChild(copyBtn);
+      done.querySelector(".toolbar").appendChild(again);
+      done.querySelector(".toolbar").appendChild(toLogin);
+      root.appendChild(done);
+      return;
+    }
+
     var card = el(
       '<section class="card">' +
         "<h1>Заявка на личный кабинет</h1>" +
-        '<p class="status">Заявку нужно подать на том же устройстве, где работает админ — либо админ создаст кабинет и пришлёт вам ссылку-приглашение.</p>' +
+        '<p class="status">После отправки получите ссылку и отправьте её админу (Telegram / VK). Иначе заявка останется только в этом браузере.</p>' +
         '<form class="stack">' +
         '<label class="lbl">ФИО</label>' +
         '<input name="name" required maxlength="80" placeholder="Иванова А. С." />' +
@@ -522,7 +624,7 @@
         '<select name="groupId"></select>' +
         '<label class="lbl">Комментарий</label>' +
         '<textarea name="comment" rows="3" maxlength="200" placeholder="Например: куратор группы 616"></textarea>' +
-        '<button class="btn" type="submit">Отправить заявку</button></form>' +
+        '<button class="btn" type="submit">Создать заявку</button></form>' +
         '<p class="status"><button class="link" type="button" id="go-login">Уже есть кабинет — войти</button></p>' +
         "</section>"
     );
@@ -532,6 +634,10 @@
     });
     var groupSel = card.querySelector('[name="groupId"]');
     groupSel.appendChild(option("", "Пока не выбрана"));
+    if (!data.groups.length) {
+      store.ensurePresetGroups(data);
+      persist();
+    }
     data.groups
       .slice()
       .sort(function (a, b) {
@@ -561,27 +667,16 @@
             return;
           }
           if (!persist()) return;
-          store.addLog(
-            data,
-            { login: String(fd.get("login") || ""), name: String(fd.get("name") || "") },
-            "Заявка на регистрацию",
-            "Роль: " +
-              store.roleLabel(String(fd.get("role") || "curator")) +
-              (fd.get("groupId")
-                ? " · группа " +
-                  ((groupById(String(fd.get("groupId"))) || {}).name || "?")
-                : "") +
-              (fd.get("comment") ? " · " + String(fd.get("comment")) : ""),
-            {
-              target: "@" + String(fd.get("login") || ""),
-              category: String(fd.get("role") || ""),
-              groupId: String(fd.get("groupId") || ""),
-              groupName: ((groupById(String(fd.get("groupId"))) || {}).name || ""),
-            }
-          );
-          persist();
-          toast("Заявка отправлена. Ждите решения админа.");
-          navigate("login", true);
+          var url = requestShareUrl(res.request);
+          state.lastRequestLink = {
+            login: res.request.login,
+            url: url,
+          };
+          toast("Скопируйте ссылку и отправьте админу");
+          render();
+        })
+        .catch(function () {
+          toast("Не удалось создать заявку", true);
         });
     });
     root.appendChild(card);
@@ -670,7 +765,7 @@
       '<section class="card"><h2>Ожидают решения (' +
         pending.length +
         ")</h2>" +
-        '<p class="status">Важно: заявка видна только на этом устройстве. После принятия отправьте преподавателю бэкап или ссылку-приглашение с экрана «Кабинеты».</p></section>'
+        '<p class="status">Заявки с другого браузера появляются здесь только если преподаватель прислал ссылку заявки и вы её открыли. После принятия отправьте ему ссылку-приглашение.</p></section>'
     );
     if (!pending.length) {
       reqCard.appendChild(el('<p class="status">Новых заявок нет.</p>'));
@@ -746,8 +841,15 @@
             }
           );
           if (!persist()) return;
-          toast("Кабинет создан на этом устройстве");
-          render();
+          if (res.user) {
+            state.lastInvite = {
+              login: res.user.login,
+              password: "(пароль, который задал при заявке)",
+              url: inviteUrlFor(res.user),
+            };
+          }
+          toast("Кабинет создан — отправьте ссылку преподавателю");
+          navigate("users", true);
         });
         no.addEventListener("click", function () {
           store.rejectRequest(data, req.id);
@@ -905,9 +1007,9 @@
           "<h2>Ссылка для @" +
           escapeHtml(state.lastInvite.login) +
           "</h2>" +
-          '<p class="status">Пароль: <strong>' +
+          '<p class="status">Отправьте ссылку преподавателю. Пароль: <strong>' +
           escapeHtml(state.lastInvite.password) +
-          "</strong>. Отправьте ссылку преподавателю — кабинет появится на его телефоне.</p>" +
+          "</strong> (если создавали вы) или тот, что он указал в заявке.</p>" +
           '<div class="toolbar"></div></section>'
       );
       var copyBtn = el('<button class="btn" type="button">Копировать ссылку</button>');

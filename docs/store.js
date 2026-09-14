@@ -339,19 +339,27 @@
     var salt = makeSalt();
     return hashPassword(password, salt)
       .then(function (hash) {
-        data.requests.unshift({
+        var req = {
           id: uid(),
           login: loginName,
           name: name.slice(0, 80),
           role: role,
           groupId: groupId || "",
+          groupName: "",
           comment: comment.slice(0, 200),
           salt: salt,
           passwordHash: hash,
           status: "pending",
           createdAt: new Date().toISOString(),
-        });
-        return { ok: true };
+        };
+        if (groupId) {
+          var g = data.groups.find(function (x) {
+            return x.id === groupId;
+          });
+          if (g) req.groupName = g.name;
+        }
+        data.requests.unshift(req);
+        return { ok: true, request: req };
       })
       .catch(function (err) {
         return {
@@ -361,9 +369,83 @@
       });
   }
 
+  function buildRequestPayload(req) {
+    return {
+      v: 1,
+      kind: "request",
+      id: req.id,
+      login: req.login,
+      name: req.name,
+      role: req.role,
+      groupId: req.groupId || "",
+      groupName: req.groupName || "",
+      comment: req.comment || "",
+      salt: req.salt,
+      passwordHash: req.passwordHash,
+      status: "pending",
+      createdAt: req.createdAt || new Date().toISOString(),
+    };
+  }
+
+  function resolveGroupIdByName(data, name, fallbackId) {
+    if (name) {
+      var found = data.groups.find(function (g) {
+        return String(g.name).toLowerCase() === String(name).toLowerCase();
+      });
+      if (found) return found.id;
+    }
+    if (fallbackId) {
+      var byId = data.groups.find(function (g) {
+        return g.id === fallbackId;
+      });
+      if (byId) return byId.id;
+    }
+    return "";
+  }
+
+  function importRequest(data, raw) {
+    try {
+      var payload = decodeInvite(raw);
+      if (!payload || payload.kind !== "request" || !payload.login || !payload.passwordHash) {
+        return { ok: false, error: "Ссылка заявки повреждена" };
+      }
+      var loginName = normalizeLogin(payload.login);
+      if (findUserByLogin(data, loginName)) {
+        return { ok: false, error: "Пользователь @" + loginName + " уже есть" };
+      }
+      var exists = data.requests.some(function (r) {
+        return (
+          (payload.id && r.id === payload.id) ||
+          (r.status === "pending" && normalizeLogin(r.login) === loginName)
+        );
+      });
+      if (exists) {
+        return { ok: true, already: true, login: loginName };
+      }
+      var groupId = resolveGroupIdByName(data, payload.groupName, payload.groupId);
+      data.requests.unshift({
+        id: payload.id || uid(),
+        login: loginName,
+        name: String(payload.name || loginName).slice(0, 80),
+        role: payload.role && ROLES[payload.role] ? payload.role : "curator",
+        groupId: groupId,
+        groupName: payload.groupName || "",
+        comment: String(payload.comment || "").slice(0, 200),
+        salt: payload.salt,
+        passwordHash: payload.passwordHash,
+        status: "pending",
+        createdAt: payload.createdAt || new Date().toISOString(),
+      });
+      return { ok: true, already: false, login: loginName };
+    } catch (e) {
+      return { ok: false, error: "Не удалось открыть заявку" };
+    }
+  }
+
   function buildInvitePayload(user, password) {
     return {
       v: 1,
+      kind: "invite",
       login: user.login,
       name: user.name,
       role: user.role,
@@ -391,6 +473,9 @@
   function acceptInvite(data, raw) {
     try {
       var payload = decodeInvite(raw);
+      if (payload && payload.kind === "request") {
+        return { ok: false, error: "Это ссылка заявки. Откройте её под админом." };
+      }
       if (!payload || !payload.login || !payload.passwordHash || !payload.salt) {
         return { ok: false, error: "Ссылка-приглашение повреждена" };
       }
@@ -445,11 +530,14 @@
     }
     var groupIds = [];
     var groupId = (overrides && overrides.groupId) || req.groupId;
+    if (!groupId && req.groupName) {
+      groupId = resolveGroupIdByName(data, req.groupName, "");
+    }
     if (groupId) groupIds = [groupId];
     if (role === "curator" && !groupIds.length) {
       return { ok: false, error: "Куратору нужно указать группу" };
     }
-    data.users.push({
+    var user = {
       id: uid(),
       login: req.login,
       name: req.name,
@@ -459,10 +547,11 @@
       groupIds: groupIds,
       status: "active",
       createdAt: new Date().toISOString(),
-    });
+    };
+    data.users.push(user);
     req.status = "approved";
     req.resolvedAt = new Date().toISOString();
-    return { ok: true };
+    return { ok: true, user: user };
   }
 
   function rejectRequest(data, requestId) {
@@ -907,6 +996,8 @@
     buildInvitePayload: buildInvitePayload,
     encodeInvite: encodeInvite,
     acceptInvite: acceptInvite,
+    buildRequestPayload: buildRequestPayload,
+    importRequest: importRequest,
     addLog: addLog,
     logsCsv: logsCsv,
     clearLogs: clearLogs,
